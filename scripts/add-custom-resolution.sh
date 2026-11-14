@@ -68,6 +68,7 @@ if [ "$REMOVE" -eq 1 ]; then
     exit 0
   fi
   sudo rm -f "$FILE"
+  sudo defaults delete /Library/Preferences/com.apple.windowserver DisplayResolutionEnabled 2>/dev/null || true
   echo "已删除 override，接下来重新枚举显示器…"
   "$BIN" detect || true
   exit 0
@@ -99,6 +100,10 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
+# macOS 还需要一个全局开关，允许 windowserver 采信 scale-resolutions
+# （BetterDisplay 内部执行的就是同一条 defaults write）
+sudo defaults write /Library/Preferences/com.apple.windowserver DisplayResolutionEnabled -bool YES
+
 sudo mkdir -p "$DIR"
 printf '%s\n' "$PLIST" | sudo tee "$FILE" >/dev/null
 sudo chmod 644 "$FILE"
@@ -109,9 +114,12 @@ echo "请求系统重新枚举显示器…"
 
 cat <<'TIP'
 
-如果新分辨率没有立刻出现，依次尝试：
-  1. 在「系统设置 > 显示器」里切换一次分辨率，然后再看列表
-  2. 拔插显示器线缆（外接屏），或合盖唤醒（内建屏）
+但 override 写进去≠立刻生效，WindowServer 只在「重新枚举显示器」时才重读它。
+BetterDisplay 把这个步骤叫做 activation：Apple Silicon 上它会切断外接屏的链路
+2–4 秒（屏幕黑一下），内建屏则必须重启；我们没做这套，所以需要你手动触发：
+
+  1. 点 App 菜单里的「重新枚举显示器」，再看列表
+  2. 拔插显示器线缆（外接屏）
   3. 重启 Mac
 
 查看结果:
