@@ -38,6 +38,7 @@ H27T22C — 2560×1440
   └─ [x] 2560×1440  · 75Hz        ← 当前模式打勾
 虚拟屏 ▸  1280×720 … 2880×1620 / 自定义… / 断开
 重新枚举显示器
+激活显示配置（屏幕会闪一下）
 打开显示器设置…
 启动时自动连接虚拟屏
 退出 HiDPI
@@ -72,22 +73,35 @@ plist 里关键的两项：
 
 ## 新增自定义分辨率
 
-脚本已备好，**需要你自己在终端里跑一次 `sudo`**（本机 `sudo` 需要密码，我无法代跑）：
+完整流程已封装，**需要你自己在终端跑一次 `sudo`**（本机 `sudo` 要密码，我无法代跑）：
 
 ```bash
-swift build -c release                      # 先构建 CLI
+swift build -c release                          # 先构建 CLI
 
-# 先看这台显示器往哪儿写、写什么（不需要 root）
+# 1. 先看要写什么（不需要 root）
 ./scripts/add-custom-resolution.sh 2 1920x1080 1600x900 --dry-run
 
-# 真正写入（会提示输入密码）
+# 2. 真正写入 + 自动激活（会提示密码，屏幕会闪一下）
 ./scripts/add-custom-resolution.sh 2 1920x1080 1600x900
 
-# 回滚
+# 3. 回滚
 ./scripts/add-custom-resolution.sh 2 --remove
 ```
 
-写入后菜单里会出现新档位；如果没立刻出现，依次尝试：切换一次分辨率 → 拔插线缆 → 重启 Mac → 点菜单里的「重新枚举显示器」。
+脚本做四件事（对应 BetterDisplay 的四层）：
+
+1. 写 `scale-resolutions` 到 `/Library/Displays/Contents/Resources/Overrides/DisplayVendorID-<v>/DisplayProductID-<p>`
+2. 打开全局开关 `defaults write /Library/Preferences/com.apple.windowserver DisplayResolutionEnabled -bool YES`
+3. 调 `hidpi activate` 强制重新枚举（`SLSDetectDisplays` + 显示器休眠/唤醒）
+4. **前后对比模式表**，直接告诉你新档位有没有出现：
+
+```
+=== 模式表变化 ===
+新增档位:
+  + 1920x1080 HiDPI
+```
+
+如果没有新增档位，说明该 macOS 版本没采信 override，需要拔插线缆或重启。加 `--no-activate` 可跳过第 3 步自行控制时机。
 
 ⚠️ override 按 **vendor/model** 生效，会同时影响所有同型号显示器。
 
@@ -100,6 +114,7 @@ swift build -c release                      # 先构建 CLI
 | `hidpi set <id> <索引>` | 立即切换模式 |
 | `hidpi info <id>` | 打印厂商号/型号号与 override 路径 |
 | `hidpi detect` | 让系统重新枚举显示器（`SLSDetectDisplays`） |
+| `hidpi activate` | 激活 override：重枚举 + 显示器休眠唤醒（`--no-sleep` 可跳过休眠） |
 | `hidpi create` | 创建 HiDPI 虚拟屏（`--size/--refresh/--name/--lo/--seconds`） |
 
 ### 实测

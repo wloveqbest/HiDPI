@@ -123,6 +123,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     redetect.target = self
     menu.addItem(redetect)
 
+    let activate = NSMenuItem(title: "激活显示配置（屏幕会闪一下）",
+                              action: #selector(activateConfiguration), keyEquivalent: "")
+    activate.target = self
+    menu.addItem(activate)
+
     let settings = NSMenuItem(title: "打开显示器设置…", action: #selector(openSettings), keyEquivalent: "")
     settings.target = self
     menu.addItem(settings)
@@ -277,6 +282,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   @objc private func redetectDisplays() {
     _ = hd_detect_displays()
     rebuildMenu()
+  }
+
+  /// 让 WindowServer 重新枚举：先请求重枚举，再让显示器休眠/唤醒一次
+  @objc private func activateConfiguration() {
+    _ = hd_detect_displays()
+    runProcess("/usr/bin/pmset", ["displaysleepnow"])
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+      self.runProcess("/usr/bin/caffeinate", ["-u", "-t", "2"])
+      DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+        self.rebuildMenu()
+      }
+    }
+  }
+
+  @discardableResult
+  private func runProcess(_ path: String, _ args: [String]) -> Int32 {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: path)
+    process.arguments = args
+    do { try process.run() } catch { return -1 }
+    process.waitUntilExit()
+    return process.terminationStatus
   }
 
   @objc private func openSettings() {

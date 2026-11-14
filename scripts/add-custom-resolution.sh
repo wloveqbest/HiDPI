@@ -33,15 +33,22 @@ shift
 
 REMOVE=0
 DRY_RUN=0
+NO_ACTIVATE=0
 SIZES=()
 for arg in "$@"; do
   case "$arg" in
     --remove) REMOVE=1 ;;
     --dry-run) DRY_RUN=1 ;;
+    --no-activate) NO_ACTIVATE=1 ;;
     [0-9]*x[0-9]*) SIZES+=("$arg") ;;
     *) echo "无法识别的参数: $arg" >&2; exit 1 ;;
   esac
 done
+
+# 模式表快照：逻辑尺寸 + HiDPI/LoDPI
+snapshot_modes() {
+  "$BIN" modes "$1" 2>/dev/null | awk '$1 ~ /^[0-9]+$/ {print $2, $5}' | sort -u
+}
 
 if [ "$REMOVE" -eq 0 ] && [ ${#SIZES[@]} -eq 0 ]; then
   echo "至少给一个逻辑分辨率，例如 1920x1080" >&2
@@ -70,7 +77,7 @@ if [ "$REMOVE" -eq 1 ]; then
   sudo rm -f "$FILE"
   sudo defaults delete /Library/Preferences/com.apple.windowserver DisplayResolutionEnabled 2>/dev/null || true
   echo "已删除 override，接下来重新枚举显示器…"
-  "$BIN" detect || true
+  "$BIN" activate || true
   exit 0
 fi
 
@@ -100,6 +107,8 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
+BEFORE="$(snapshot_modes "$DISPLAY_ID")"
+
 # macOS 还需要一个全局开关，允许 windowserver 采信 scale-resolutions
 # （BetterDisplay 内部执行的就是同一条 defaults write）
 sudo defaults write /Library/Preferences/com.apple.windowserver DisplayResolutionEnabled -bool YES
@@ -109,8 +118,24 @@ printf '%s\n' "$PLIST" | sudo tee "$FILE" >/dev/null
 sudo chmod 644 "$FILE"
 echo "已写入 $FILE"
 
-echo "请求系统重新枚举显示器…"
-"$BIN" detect || true
+if [ "$NO_ACTIVATE" -eq 1 ]; then
+  echo "已写入（跳过激活）。手动激活: $BIN activate"
+else
+  echo "激活配置（屏幕会闪一下）…"
+  "$BIN" activate || true
+fi
+
+AFTER="$(snapshot_modes "$DISPLAY_ID")"
+echo
+echo "=== 模式表变化 ==="
+ADDED="$(comm -13 <(printf '%s\n' "$BEFORE") <(printf '%s\n' "$AFTER") | sed '/^$/d')"
+if [ -n "$ADDED" ]; then
+  echo "新增档位:"
+  printf '%s\n' "$ADDED" | sed 's/^/  + /'
+else
+  echo "没有新档位出现（override 未被采信，或该尺寸系统直接拒绝）。"
+  echo "当前档位数: $(printf '%s\n' "$AFTER" | sed '/^$/d' | wc -l | tr -d ' ')"
+fi
 
 cat <<'TIP'
 

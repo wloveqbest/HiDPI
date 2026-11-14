@@ -33,7 +33,8 @@ hidpi — 开源的 macOS HiDPI 工具
       --name <NAME>      显示器名称（默认 HiDPI Display）
       --lo               创建 1x（非 HiDPI）显示
       --seconds <N>      运行 N 秒后自动断开（默认运行到 Ctrl-C）
-  hidpi detect                           让系统重新枚举显示器（override 生效用）
+  hidpi detect                           让系统重新枚举显示器
+  hidpi activate                         激活 override：重新枚举 + 显示休眠唤醒（屏幕会闪一下）
   hidpi info <displayID>                 显示厂商号/型号号（生成 override 用）
   hidpi version                          版本信息
   hidpi help                             显示本帮助
@@ -189,6 +190,48 @@ func cmdDetect() {
   print("已请求系统重新枚举显示器")
 }
 
+/// 执行外部命令，返回退出码
+@discardableResult
+func run(_ path: String, _ arguments: [String]) -> Int32 {
+  let process = Process()
+  process.executableURL = URL(fileURLWithPath: path)
+  process.arguments = arguments
+  do {
+    try process.run()
+  } catch {
+    return -1
+  }
+  process.waitUntilExit()
+  return process.terminationStatus
+}
+
+func cmdActivate(_ args: [String]) {
+  let skipSleep = args.contains("--no-sleep")
+
+  print("1/3 请求重新枚举显示器")
+  _ = hd_detect_displays()
+
+  if !skipSleep {
+    print("2/3 让显示器休眠 1 秒（屏幕会黑一下）")
+    run("/usr/bin/pmset", ["displaysleepnow"])
+    Thread.sleep(forTimeInterval: 1.0)
+    print("3/3 唤醒并重新枚举")
+    run("/usr/bin/caffeinate", ["-u", "-t", "2"])
+  }
+
+  Thread.sleep(forTimeInterval: 1.5)
+  let count = screenCount()
+  print("完成：当前在线显示器 \(count) 块")
+  print("如果新分辨率仍未出现，说明该 macOS 版本不采信 override，或需要重启/拔插线缆。")
+}
+
+/// 用公开 API 数一数当前在线显示器
+func screenCount() -> Int {
+  var count: UInt32 = 0
+  CGGetActiveDisplayList(0, nil, &count)
+  return Int(count)
+}
+
 // MARK: - 创建虚拟显示器
 
 func cmdCreate(_ args: [String]) {
@@ -336,6 +379,8 @@ case "info":
   cmdInfo(Array(arguments.dropFirst()))
 case "detect":
   cmdDetect()
+case "activate":
+  cmdActivate(Array(arguments.dropFirst()))
 case "version", "--version", "-v":
   print("hidpi 0.1.0 — MIT License")
   print("虚拟屏机制参考 BetterDummy OpenSource Edition (MIT, Istvan T.)")
