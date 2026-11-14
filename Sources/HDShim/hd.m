@@ -236,6 +236,39 @@ int hd_display_current_mode(uint32_t displayID) {
   return current;
 }
 
+typedef void (*CGSConfigureDisplayEnabledFn)(CGDisplayConfigRef, uint32_t, bool);
+
+int hd_cycle_display(uint32_t displayID, double seconds) {
+  CGSConfigureDisplayEnabledFn configure =
+      (CGSConfigureDisplayEnabledFn)resolveCGS("CGSConfigureDisplayEnabled");
+  if (configure == NULL) {
+    return -1;
+  }
+
+  CGDisplayConfigRef config = NULL;
+  if (CGBeginDisplayConfiguration(&config) != kCGErrorSuccess || config == NULL) {
+    return -1;
+  }
+  configure(config, displayID, false);
+  CGError disableError = CGCompleteDisplayConfiguration(config, kCGConfigurePermanently);
+  if (disableError != kCGErrorSuccess) {
+    return -2;
+  }
+
+  if (seconds > 0) {
+    usleep((useconds_t)(seconds * 1e6));
+  }
+
+  // 无论发生什么都要尝试恢复
+  CGDisplayConfigRef restore = NULL;
+  if (CGBeginDisplayConfiguration(&restore) != kCGErrorSuccess || restore == NULL) {
+    return -3;
+  }
+  configure(restore, displayID, true);
+  CGError enableError = CGCompleteDisplayConfiguration(restore, kCGConfigurePermanently);
+  return enableError == kCGErrorSuccess ? 0 : -4;
+}
+
 typedef void (*SLSDetectDisplaysFn)(void);
 
 int hd_detect_displays(void) {

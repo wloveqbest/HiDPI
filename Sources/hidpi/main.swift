@@ -34,7 +34,8 @@ hidpi — 开源的 macOS HiDPI 工具
       --lo               创建 1x（非 HiDPI）显示
       --seconds <N>      运行 N 秒后自动断开（默认运行到 Ctrl-C）
   hidpi detect                           让系统重新枚举显示器
-  hidpi activate                         激活 override：重新枚举 + 显示休眠唤醒（屏幕会闪一下）
+  hidpi cycle <displayID> [秒数]          软件断开/重连显示器（会黑屏，激活 override 用）
+  hidpi activate <displayID>             激活 override（等同 cycle <id> 2）
   hidpi info <displayID>                 显示厂商号/型号号（生成 override 用）
   hidpi version                          版本信息
   hidpi help                             显示本帮助
@@ -206,23 +207,17 @@ func run(_ path: String, _ arguments: [String]) -> Int32 {
 }
 
 func cmdActivate(_ args: [String]) {
-  let skipSleep = args.contains("--no-sleep")
-
-  print("1/3 请求重新枚举显示器")
-  _ = hd_detect_displays()
-
-  if !skipSleep {
-    print("2/3 让显示器休眠 1 秒（屏幕会黑一下）")
-    run("/usr/bin/pmset", ["displaysleepnow"])
-    Thread.sleep(forTimeInterval: 1.0)
-    print("3/3 唤醒并重新枚举")
-    run("/usr/bin/caffeinate", ["-u", "-t", "2"])
+  guard let displayID = args.first.flatMap(parseUInt32) else {
+    err("用法: hidpi activate <displayID>   （等价于 hidpi cycle <id> 2）")
+    return
   }
-
-  Thread.sleep(forTimeInterval: 1.5)
-  let count = screenCount()
-  print("完成：当前在线显示器 \(count) 块")
-  print("如果新分辨率仍未出现，说明该 macOS 版本不采信 override，或需要重启/拔插线缆。")
+  print("断开并重连显示器 \(displayID)，迫使系统重读 override（屏幕会黑一下）…")
+  let result = hd_cycle_display(displayID, 2.0)
+  if result == 0 {
+    print("已激活")
+  } else {
+    err("激活失败，错误码 \(result)")
+  }
 }
 
 /// 用公开 API 数一数当前在线显示器
@@ -230,6 +225,28 @@ func screenCount() -> Int {
   var count: UInt32 = 0
   CGGetActiveDisplayList(0, nil, &count)
   return Int(count)
+}
+
+func cmdCycle(_ args: [String]) {
+  guard args.count >= 1, let displayID = parseUInt32(args[0]) else {
+    err("用法: hidpi cycle <displayID> [秒数]")
+    return
+  }
+  let seconds = args.count >= 2 ? (Double(args[1]) ?? 2) : 2
+  print("断开显示器 \(displayID) \(Int(seconds)) 秒后重连（屏幕会黑一下）…")
+  let result = hd_cycle_display(displayID, seconds)
+  switch result {
+  case 0:
+    print("已完成断开/重连")
+  case -1:
+    err("CGSConfigureDisplayEnabled 不可用")
+  case -2:
+    err("系统拒绝了断开操作")
+  case -3, -4:
+    err("重连步骤失败，请立刻执行: hidpi cycle \(displayID) 0 或重新连接线缆")
+  default:
+    err("未知错误 \(result)")
+  }
 }
 
 // MARK: - 创建虚拟显示器
@@ -379,6 +396,8 @@ case "info":
   cmdInfo(Array(arguments.dropFirst()))
 case "detect":
   cmdDetect()
+case "cycle":
+  cmdCycle(Array(arguments.dropFirst()))
 case "activate":
   cmdActivate(Array(arguments.dropFirst()))
 case "version", "--version", "-v":

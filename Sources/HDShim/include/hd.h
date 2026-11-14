@@ -31,6 +31,10 @@ int hd_display_mode_count(uint32_t displayID);
 int hd_display_mode_at(uint32_t displayID, int index, hd_mode_t *out);
 int hd_display_current_mode(uint32_t displayID);
 
+/// 软件断开显示器 seconds 秒后再重连，迫使系统重新枚举（等价于拔插线缆）。
+/// 会短暂黑屏，调用方务必保证重连一定执行。
+int hd_cycle_display(uint32_t displayID, double seconds);
+
 /// 让 WindowServer 重新枚举显示器（私有 SLSDetectDisplays）。
 /// 写入 override plist 后用它可以免重启生效，具体是否成功取决于 macOS 版本。
 int hd_detect_displays(void);

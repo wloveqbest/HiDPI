@@ -65,10 +65,15 @@ if [ -z "$VENDOR" ] || [ -z "$PRODUCT" ]; then
   exit 1
 fi
 
-DIR="/Library/Displays/Contents/Resources/Overrides/DisplayVendorID-$VENDOR"
-FILE="$DIR/DisplayProductID-$PRODUCT"
+HEX_VENDOR=$(printf '%x' "$VENDOR")
+HEX_PRODUCT=$(printf '%x' "$PRODUCT")
+BASE="/Library/Displays/Contents/Resources/Overrides"
+DIR="$BASE/DisplayVendorID-$HEX_VENDOR"          # 新版 macOS 按十六进制查找
+FILE="$DIR/DisplayProductID-$HEX_PRODUCT"
+LEGACY_DIR="$BASE/DisplayVendorID-$VENDOR"       # 旧版 macOS 用十进制
+LEGACY_FILE="$LEGACY_DIR/DisplayProductID-$PRODUCT"
 
-echo "显示器 $DISPLAY_ID → vendor=$VENDOR product=$PRODUCT"
+echo "显示器 $DISPLAY_ID → vendor=$VENDOR (0x$HEX_VENDOR) product=$PRODUCT (0x$HEX_PRODUCT)"
 echo "目标文件: $FILE"
 
 if [ "$REMOVE" -eq 1 ]; then
@@ -76,7 +81,7 @@ if [ "$REMOVE" -eq 1 ]; then
     echo "[dry-run] 将删除 $FILE"
     exit 0
   fi
-  sudo rm -f "$FILE"
+  sudo rm -f "$FILE" "$LEGACY_FILE"
   sudo defaults delete /Library/Preferences/com.apple.windowserver DisplayResolutionEnabled 2>/dev/null || true
   echo "已删除 override，接下来重新枚举显示器…"
   "$BIN" activate || true
@@ -84,21 +89,30 @@ if [ "$REMOVE" -eq 1 ]; then
 fi
 
 # 生成 plist：scale-resolutions 里放的是「背衬像素尺寸」，每项 8 字节大端 (width, height)
-PLIST=$(python3 - "${SIZES[@]}" <<'PY'
-import struct, sys, plistlib
+PLIST=$(python3 - "$FILE" "${SIZES[@]}" <<'PY'
+import os, struct, sys, plistlib
 
-sizes = []
-for token in sys.argv[1:]:
-    if not token[0].isdigit():
+existing_path = sys.argv[1]
+
+# 先保留已有条目，避免每次运行把上一次的档位冲掉
+entries = []
+if os.path.exists(existing_path):
+    try:
+        with open(existing_path, "rb") as handle:
+            old = plistlib.load(handle)
+        entries = [bytes(item) for item in old.get("scale-resolutions", [])]
+    except Exception:
+        entries = []
+
+for token in sys.argv[2:]:
+    if not token or not token[0].isdigit():
         continue
     w, h = (int(x) for x in token.lower().split("x"))
-    # HiDPI：逻辑尺寸对应的背衬是 2 倍
-    sizes.append((w * 2, h * 2))
+    packed = struct.pack(">II", w * 2, h * 2)   # HiDPI：背衬 = 逻辑尺寸 × 2
+    if packed not in entries:
+        entries.append(packed)
 
-pl = {
-    "DisplayResolutionEnabled": True,
-    "scale-resolutions": [struct.pack(">II", w, h) for w, h in sizes],
-}
+pl = {"DisplayResolutionEnabled": True, "scale-resolutions": entries}
 sys.stdout.write(plistlib.dumps(pl, fmt=plistlib.FMT_XML).decode())
 PY
 )
@@ -115,16 +129,18 @@ BEFORE="$(snapshot_modes "$DISPLAY_ID")"
 # （BetterDisplay 内部执行的就是同一条 defaults write）
 sudo defaults write /Library/Preferences/com.apple.windowserver DisplayResolutionEnabled -bool YES
 
-sudo mkdir -p "$DIR"
+sudo mkdir -p "$DIR" "$LEGACY_DIR"
 printf '%s\n' "$PLIST" | sudo tee "$FILE" >/dev/null
-sudo chmod 644 "$FILE"
+printf '%s\n' "$PLIST" | sudo tee "$LEGACY_FILE" >/dev/null
+sudo chmod 644 "$FILE" "$LEGACY_FILE"
 echo "已写入 $FILE"
+echo "兼容副本: $LEGACY_FILE"
 
 if [ "$NO_ACTIVATE" -eq 1 ]; then
-  echo "已写入（跳过激活）。手动激活: $BIN activate"
+  echo "已写入（跳过激活）。手动激活: $BIN cycle $DISPLAY_ID 2"
 else
-  echo "激活配置（屏幕会闪一下）…"
-  "$BIN" activate || true
+  echo "激活配置：断开并重连显示器（会黑屏约 2 秒）…"
+  "$BIN" cycle "$DISPLAY_ID" 2 || true
 fi
 
 AFTER="$(snapshot_modes "$DISPLAY_ID")"
@@ -140,18 +156,10 @@ else
 fi
 
 cat <<'TIP'
-
-但 override 写进去≠立刻生效，WindowServer 只在「重新枚举显示器」时才重读它。
-BetterDisplay 把这个步骤叫做 activation：Apple Silicon 上它会切断外接屏的链路
-2–4 秒（屏幕黑一下），内建屏则必须重启；我们没做这套，所以需要你手动触发：
-
-  1. 点 App 菜单里的「重新枚举显示器」，再看列表
-  2. 拔插显示器线缆（外接屏）
-  3. 重启 Mac
-
-查看结果:
-  ./hidpi list
-  ./hidpi modes <displayID>
+说明：
+  * 新版 macOS 按「十六进制」查找 override，脚本已同时写入 hex 与 decimal 两份路径
+  * 激活靠断开/重连显示器（约黑屏 2 秒），无需拔插线缆
+  * HiDPI 背衬上限约为 5120 像素宽，超出的档位（如 2880x1620、3008x1692）会被系统丢弃
 回滚:
   ./scripts/add-custom-resolution.sh <displayID> --remove
 TIP
