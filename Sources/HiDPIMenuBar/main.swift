@@ -205,15 +205,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     hidpiItem.state = current?.hiDPI == true ? .on : .off
     menu.addItem(hidpiItem)
 
-    menu.addItem(.separator())
-
-    // 4) 让新注入的分辨率生效：WindowServer 只在显示器重连时才重读 override
-    let activate = NSMenuItem(title: "应用新分辨率（重连显示器，黑屏约 2 秒）",
-                              action: #selector(activateDisplay(_:)), keyEquivalent: "")
-    activate.target = self
-    activate.representedObject = NSNumber(value: displayID)
-    menu.addItem(activate)
-
     return menu
   }
 
@@ -298,15 +289,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     if hd_display_set_mode(displayID, Int32(target.index)) != 0 {
       notify(title: "切换失败", text: "系统拒绝了这次模式切换。")
       return
-    }
-    rebuildMenu()
-  }
-
-  @objc private func activateDisplay(_ sender: NSMenuItem) {
-    guard let number = sender.representedObject as? NSNumber else { return }
-    let result = hd_cycle_display(number.uint32Value, 2.0)
-    if result != 0 {
-      notify(title: "重连失败", text: "错误码 \(result)。若屏幕没有恢复，请拔插一次显示器线缆。")
     }
     rebuildMenu()
   }
