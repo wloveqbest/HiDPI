@@ -33,6 +33,8 @@ hidpi — 开源的 macOS HiDPI 工具
       --name <NAME>      显示器名称（默认 HiDPI Display）
       --lo               创建 1x（非 HiDPI）显示
       --seconds <N>      运行 N 秒后自动断开（默认运行到 Ctrl-C）
+  hidpi detect                           让系统重新枚举显示器（override 生效用）
+  hidpi info <displayID>                 显示厂商号/型号号（生成 override 用）
   hidpi version                          版本信息
   hidpi help                             显示本帮助
 
@@ -162,6 +164,29 @@ func cmdSet(_ args: [String]) {
     return
   }
   print("已将显示器 \(displayID) 切换到模式索引 \(index)")
+}
+
+// MARK: - 额外命令
+
+func cmdInfo(_ args: [String]) {
+  guard args.count >= 1, let displayID = parseUInt32(args[0]) else {
+    err("用法: hidpi info <displayID>")
+    return
+  }
+  let vendor = hd_display_vendor_id(displayID)
+  let product = hd_display_product_id(displayID)
+  print("显示器 \(displayID)")
+  print("  厂商号   0x\(String(vendor, radix: 16)) (\(vendor))")
+  print("  型号号   0x\(String(product, radix: 16)) (\(product))")
+  print("  Override 路径  /Library/Displays/Contents/Resources/Overrides/DisplayVendorID-\(vendor)/DisplayProductID-\(product)")
+}
+
+func cmdDetect() {
+  if hd_detect_displays() != 0 {
+    err("无法调用 SLSDetectDisplays（该 macOS 版本未导出此符号）")
+    return
+  }
+  print("已请求系统重新枚举显示器")
 }
 
 // MARK: - 创建虚拟显示器
@@ -307,6 +332,10 @@ case "set":
   cmdSet(Array(arguments.dropFirst()))
 case "create":
   cmdCreate(Array(arguments.dropFirst()))
+case "info":
+  cmdInfo(Array(arguments.dropFirst()))
+case "detect":
+  cmdDetect()
 case "version", "--version", "-v":
   print("hidpi 0.1.0 — MIT License")
   print("虚拟屏机制参考 BetterDummy OpenSource Edition (MIT, Istvan T.)")

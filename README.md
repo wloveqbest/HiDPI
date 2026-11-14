@@ -1,142 +1,151 @@
-# hidpi — 开源的 macOS HiDPI 工具
+# hidpi — 开源的 macOS 分辨率切换器
 
-用 macOS 私有 `CGVirtualDisplay` API 在内存里造一块 **2x 背衬的虚拟显示器**，从而在任意 Mac 上获得 HiDPI 分辨率选项。这是 BetterDisplay / BetterDummy 最核心的那部分能力，本项目用约 900 行 Swift + ObjC 独立实现，MIT 许可，**不需要任何付费授权**。
+菜单栏里直接列出**真实显示器**的分辨率，点一下即时切换（`CGSConfigureDisplayMode`），不创建任何虚拟屏。另外提供一个可选的虚拟屏功能和一套自定义分辨率注入脚本。
 
-> 本项目是**独立实现**，不包含、不修改、不绕过任何商业软件的代码或授权校验。机制参考了 BetterDummy 早期开源版（MIT）——详见 [许可与署名](#许可与署名)。
+这是 BetterDisplay / BetterDummy 最核心能力的独立开源实现，MIT 许可，**不需要付费授权**。
 
-## 两种形态
+> 独立实现，不包含、不修改、不绕过任何商业软件的代码或授权校验。机制参考了 BetterDummy 早期开源版（MIT）——详见 [许可与署名](#许可与署名)。
 
-| 形态 | 路径 | 适合 |
+## 它能做什么
+
+| 能力 | 是否需要 root | 状态 |
 |---|---|---|
-| **菜单栏 App** | `dist/HiDPI.app`（DMG 同目录） | 日常用：双击即用，点菜单栏图标选分辨率 |
-| 命令行工具 | `hidpi`（同 DMG 内 `hidpi-cli`） | 脚本、launchd 常驻、调试 |
+| 列出真屏所有分辨率并**即时切换** | 否 | ✅ 已实测 |
+| 新增系统没提供的自定义分辨率（如 4K 屏上的 1920×1080 HiDPI） | **是** | ✅ 脚本已备（`sudo` 运行） |
+| 创建 HiDPI 虚拟屏（无头 / 串流 / 录屏用） | 否 | ✅ 已实测 |
+| EDID 改写、DDC 亮度、镜像串流 | — | ❌ 不做 |
 
 ## 安装
 
 ```bash
-# 方式一：直接装 DMG 里的 App
-open dist/HiDPI-0.1.0.dmg      # 把 HiDPI 拖进 Applications 即可
-
-# 方式二：自己构建
-./scripts/build-app.sh          # 产出 dist/HiDPI.app 与 dist/HiDPI-0.1.0.dmg
+open dist/HiDPI-0.1.0.dmg        # 拖进 Applications
+# 或自己构建：
+./scripts/build-app.sh            # 产出 dist/HiDPI.app + dist/HiDPI-0.1.0.dmg
 ```
 
-App 只出现在菜单栏（`LSUIElement`，不占 Dock），已做**单实例保护**：重复启动只会激活已有实例，不会叠出多块虚拟屏。
+App 只出现在菜单栏（`LSUIElement`，不占 Dock），有单实例保护。
 
-## 菜单栏 App 功能
+## 菜单结构
 
 ```
-HiDPI
-├─ 虚拟屏已连接 · ID 6     （状态）
-├─ 创建 HiDPI 虚拟屏 ▸
-│    1280×720 / 1440×810 / 1600×900 / 1728×1117
-│    1920×1080 / 2048×1152 / 2560×1440 / 2880×1620
-│    ──────────
-│    自定义…
-├─ 断开虚拟屏
-├─ 显示器（2）▸            （各屏当前分辨率，含是否 HiDPI）
-├─ 打开显示器设置…
-├─ 启动时自动连接          （勾选后开机即建屏，记住上次尺寸）
-└─ 退出 HiDPI
+H27T22C — 2560×1440
+  ├─ 400×300  HiDPI · 75Hz
+  ├─ 640×480  HiDPI · 75Hz
+  ├─ 640×480  · 75Hz
+  ├─ …
+  ├─ 1920×1080  HiDPI · 75Hz
+  ├─ 2560×1440  HiDPI · 75Hz
+  └─ [x] 2560×1440  · 75Hz        ← 当前模式打勾
+虚拟屏 ▸  1280×720 … 2880×1620 / 自定义… / 断开
+重新枚举显示器
+打开显示器设置…
+启动时自动连接虚拟屏
+退出 HiDPI
 ```
 
-创建后虚拟屏会出现在「系统设置 > 显示器」里，可正常拖拽排列、设为镜像或扩展。
+同一分辨率只列一次（取最高刷新率），HiDPI 档位带标记，当前模式打勾。
+
+## 为什么"直接切换"和"新增分辨率"是两回事
+
+macOS 每个显示器维护一张**模式表**，系统偏好设置里能选的档位就是它的子集。所以：
+
+1. **表里已有的档位** → 直接用 `CGSConfigureDisplayMode` 切，瞬时生效，无需 root。你的显示器日常能选的那些（包括 HiDPI）都属于这一类。
+2. **表里没有的档位** → 必须先让 macOS 把新档位加进模式表，再切。BetterDisplay 的 *Flexible Scaling* 走的就是这条路：往下面这个文件写一个 override plist，然后强制重新枚举：
+
+```
+/Library/Displays/Contents/Resources/Overrides/
+  DisplayVendorID-<vendor>/DisplayProductID-<product>
+```
+
+plist 里关键的两项：
+
+```xml
+<key>DisplayResolutionEnabled</key><true/>
+<key>scale-resolutions</key>
+<array>
+  <!-- 每项 8 字节：大端 uint32 宽 + uint32 高，放的是「背衬像素」尺寸 -->
+  <data>AAAPAAAACHA=</data>   <!-- 0x00000F00 × 0x00000870 = 3840×2160，即 1920×1080 HiDPI -->
+</array>
+```
+
+写进去之后 macOS 不会立即重读，需要重新枚举显示器（拔插线缆、重启，或调私有的 `SLSDetectDisplays`）。这一整套要 root —— 这正是 BetterDisplay 会装一个特权 helper 的原因。
+
+## 新增自定义分辨率
+
+脚本已备好，**需要你自己在终端里跑一次 `sudo`**（本机 `sudo` 需要密码，我无法代跑）：
+
+```bash
+swift build -c release                      # 先构建 CLI
+
+# 先看这台显示器往哪儿写、写什么（不需要 root）
+./scripts/add-custom-resolution.sh 2 1920x1080 1600x900 --dry-run
+
+# 真正写入（会提示输入密码）
+./scripts/add-custom-resolution.sh 2 1920x1080 1600x900
+
+# 回滚
+./scripts/add-custom-resolution.sh 2 --remove
+```
+
+写入后菜单里会出现新档位；如果没立刻出现，依次尝试：切换一次分辨率 → 拔插线缆 → 重启 Mac → 点菜单里的「重新枚举显示器」。
+
+⚠️ override 按 **vendor/model** 生效，会同时影响所有同型号显示器。
 
 ## 命令行
 
 | 命令 | 作用 |
 |---|---|
-| `hidpi list` | 列出在线显示器，显示逻辑尺寸 / 实际像素尺寸 |
-| `hidpi modes <id>` | 列出某显示器的全部模式，标注 HiDPI/LoDPI 与当前项 |
-| `hidpi set <id> <索引>` | 切换到指定模式（走 `CGSConfigureDisplayMode`） |
-| `hidpi create` | 创建 HiDPI 虚拟显示器并保持连接 |
+| `hidpi list` | 列出在线显示器及逻辑/像素尺寸 |
+| `hidpi modes <id>` | 列出某显示器全部模式，标注 HiDPI/LoDPI 与当前项 |
+| `hidpi set <id> <索引>` | 立即切换模式 |
+| `hidpi info <id>` | 打印厂商号/型号号与 override 路径 |
+| `hidpi detect` | 让系统重新枚举显示器（`SLSDetectDisplays`） |
+| `hidpi create` | 创建 HiDPI 虚拟屏（`--size/--refresh/--name/--lo/--seconds`） |
 
-`create` 选项：`--size WxH`（默认 1920x1080）、`--refresh HZ`（默认 60）、`--name NAME`、`--lo`（1x）、`--seconds N`（N 秒后自动断开；不写则运行到 Ctrl-C）。
-
-### 实测输出
+### 实测
 
 ```
-$ hidpi list
-在线显示器（1 块）
-
-ID        名称                            逻辑            像素            标记
-2         H27T22C                       1920x1080     3840x2160     主屏
-
-$ hidpi create --size 1920x1080 --name "HiDPI Test" --seconds 9
-已创建虚拟显示器
-  ID        4
-  逻辑      1920x1080 pt
-  背衬      3840x2160 px（HiDPI 2x）
-已确认 HiDPI 模式: 800x600, 960x540, 1440x810, 1920x1080, ...
-
-$ hidpi modes 4
-显示器 4 共 29 个模式，当前索引 14
+$ hidpi modes 2 | head -4
+显示器 2 共 61 个模式，当前索引 57
 
 索引      逻辑          实际像素          刷新      类型
-0       800x600     1600x1200     60      HiDPI
-2       960x540     1920x1080     60      HiDPI
-...
-28      1920x1080   1920x1080     60      LoDPI
+0       400x300     800x600       75      HiDPI
 
-$ hidpi set 4 0
-已将显示器 4 切换到模式索引 0
+$ hidpi set 2 1
+已将显示器 2 切换到模式索引 1        # 真屏 2560×1440 → 800×600 HiDPI，瞬时生效
 ```
 
 ## 原理
 
-macOS 的 HiDPI = 逻辑尺寸（point）配 2 倍像素的 backing store，再由合成器降采样到面板物理分辨率。虚拟屏之所以能"无中生有"出 HiDPI，是因为系统对待虚拟显示器和真实显示器一样，会为它的模式表生成 HiDPI 变体。
-
-用到的私有接口（全部运行时解析，不硬链接私有框架）：
-
-- **`CGVirtualDisplay` / `CGVirtualDisplayDescriptor` / `CGVirtualDisplayMode` / `CGVirtualDisplaySettings`**（CoreGraphics 私有类）：造屏并 `applySettings` 提交模式表，`hiDPI = 1` 表示按 2x 渲染。
-- **`CGSGetNumberOfDisplayModes` / `CGSGetDisplayModeDescriptionOfLength` / `CGSGetCurrentDisplayMode` / `CGSConfigureDisplayMode`**（SkyLight 私有 C 函数）：枚举与切换模式，经 `dlopen`/`dlsym` 解析。
-- 显示枚举本身用公开 API（`NSScreen` + `CGDisplayCopyDisplayMode`）。
-
-物理尺寸按 24 英寸对角线反推，色彩主坐标取自 Generic RGB Profile，使 macOS 算出合理的 DPI 与色彩描述，模式表才会被正常接受。
+- **切换**：`CGSGetNumberOfDisplayModes` / `CGSGetDisplayModeDescriptionOfLength` / `CGSGetCurrentDisplayMode` / `CGSConfigureDisplayMode`（SkyLight 私有 C 函数，`dlopen`+`dlsym` 运行时解析）。
+- **新增**：override plist 的 `scale-resolutions`，配合 `SLSDetectDisplays` 触发重新枚举。
+- **虚拟屏**（可选）：`CGVirtualDisplay` + `CGVirtualDisplayDescriptor` + `CGVirtualDisplaySettings`（CoreGraphics 私有类），`hiDPI = 1` 即按 2x 渲染。
+- 显示枚举本身用公开 API（`NSScreen` + `CGDisplayCopyDisplayMode`），不依赖私有符号。
 
 ## 已知限制
 
-- **虚拟屏与进程同寿命**：App 退出即断开；CLI 进程结束即断开。
-- **私有 API**：`CGVirtualDisplay` 不受 Apple 支持，macOS 大版本升级可能失效。
-- **不能跑在 Rosetta 下**（x86_64 转译进程拿不到这些私有服务）。
-- App 是 **ad-hoc 签名**（无开发者证书、未公证）。本机构建不会被 Gatekeeper 拦；如果你把它拷给别人，对方首次打开需要右键 → 打开。
-- 无 EDID 读写、无 DDC/CI、无亮度控制、无镜像/串流。
-
-## 常驻运行（launchd）
-
-```xml
-~/Library/LaunchAgents/local.hidpi.virtual.plist
-  ProgramArguments: /usr/local/bin/hidpi create --size 1920x1080 --name HiDPI
-  RunAtLoad / KeepAlive: true
-```
-
-```bash
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.hidpi.virtual.plist
-```
+- 私有 API 不受 Apple 支持，macOS 大版本升级可能失效。
+- **不能跑在 Rosetta 下**。
+- 自定义分辨率需要 root；macOS 27 上 override 是否仍被采信未经我实测（本机无法免密提权），脚本按经典机制生成，理论上一致。
+- App 为 ad-hoc 签名（未公证）：本机双击正常，拷给别人需右键 → 打开，或 `xattr -dr com.apple.quarantine /Applications/HiDPI.app`。
 
 ## 目录结构
 
 ```
 hidpi/
-├── Package.swift
-├── LICENSE
-├── README.md
+├── dist/                       HiDPI.app / HiDPI-0.1.0.dmg
 ├── scripts/
-│   ├── build-app.sh            # 编译 → 组装 .app → 图标 → 签名 → DMG
-│   └── make-icon.swift         # 程序化生成 1024px 图标
-├── dist/                       # 构建产物（HiDPI.app / HiDPI-0.1.0.dmg）
+│   ├── build-app.sh            编译 → 组装 .app → 图标 → 签名 → DMG
+│   ├── add-custom-resolution.sh 注入自定义分辨率（sudo）
+│   └── make-icon.swift         程序化生成图标
 └── Sources/
-    ├── HDShim/                 # 私有 API 封装（C 接口）
-    │   ├── include/hd.h
-    │   └── hd.m
-    ├── hidpi/                  # 命令行
-    │   └── main.swift
-    └── HiDPIMenuBar/           # 菜单栏 App（AppKit）
-        └── main.swift
+    ├── HDShim/                 私有 API 封装（C 接口）
+    ├── hidpi/                  命令行
+    └── HiDPIMenuBar/           菜单栏 App
 ```
 
 ## 许可与署名
 
 MIT License — 见 [LICENSE](LICENSE)。
 
-私有类型的 `@interface` 声明与虚拟屏的调用方式参考自 **BetterDummy OpenSource Edition**（MIT，Copyright (c) 2021 Istvan T.），即 [waydabber/BetterDisplay 的 `opensource` 分支](https://github.com/waydabber/BetterDisplay/tree/opensource)。上游当前的 BetterDisplay 5.x 已闭源，与本项目无代码关系。
+私有类型的 `@interface` 声明与虚拟屏调用方式参考自 **BetterDummy OpenSource Edition**（MIT，Copyright (c) 2021 Istvan T.），即 [waydabber/BetterDisplay 的 `opensource` 分支](https://github.com/waydabber/BetterDisplay/tree/opensource)。上游当前 5.x 已闭源，与本项目无代码关系。

@@ -236,6 +236,25 @@ int hd_display_current_mode(uint32_t displayID) {
   return current;
 }
 
+typedef void (*SLSDetectDisplaysFn)(void);
+
+int hd_detect_displays(void) {
+  SLSDetectDisplaysFn fn = (SLSDetectDisplaysFn)resolveCGS("SLSDetectDisplays");
+  if (fn == NULL) {
+    return -1;
+  }
+  fn();
+  return 0;
+}
+
+uint32_t hd_display_vendor_id(uint32_t displayID) {
+  return (uint32_t)CGDisplayVendorNumber(displayID);
+}
+
+uint32_t hd_display_product_id(uint32_t displayID) {
+  return (uint32_t)CGDisplayModelNumber(displayID);
+}
+
 int hd_display_set_mode(uint32_t displayID, int index) {
   CGSConfigureDisplayModeFn configure = (CGSConfigureDisplayModeFn)resolveCGS("CGSConfigureDisplayMode");
   if (configure == NULL) {

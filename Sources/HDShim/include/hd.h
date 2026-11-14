@@ -30,6 +30,14 @@ int hd_virtual_display_count(void);
 int hd_display_mode_count(uint32_t displayID);
 int hd_display_mode_at(uint32_t displayID, int index, hd_mode_t *out);
 int hd_display_current_mode(uint32_t displayID);
+
+/// 让 WindowServer 重新枚举显示器（私有 SLSDetectDisplays）。
+/// 写入 override plist 后用它可以免重启生效，具体是否成功取决于 macOS 版本。
+int hd_detect_displays(void);
+
+/// 显示器的厂商号 / 型号号（公开 API），用于生成 override plist 文件名
+uint32_t hd_display_vendor_id(uint32_t displayID);
+uint32_t hd_display_product_id(uint32_t displayID);
 int hd_display_set_mode(uint32_t displayID, int index);
 
 #endif

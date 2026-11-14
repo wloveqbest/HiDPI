@@ -17,7 +17,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var createdDisplayID: UInt32 = 0
   private var connectAtLaunch = false
 
-  /// 常用逻辑分辨率预设
   private let presets: [(width: Int, height: Int)] = [
     (1280, 720), (1440, 810), (1600, 900),
     (1728, 1117), (1920, 1080), (2048, 1152),
@@ -29,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     if let button = statusItem.button {
       button.image = NSImage(systemSymbolName: "display", accessibilityDescription: "HiDPI")
       button.image?.isTemplate = true
-      button.toolTip = "HiDPI 虚拟显示器"
+      button.toolTip = "HiDPI — 快速切换显示器分辨率"
     }
 
     let menu = NSMenu()
@@ -37,71 +36,98 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     statusItem.menu = menu
 
     connectAtLaunch = UserDefaults.standard.bool(forKey: kAutoCreateKey)
-    if connectAtLaunch, let saved = UserDefaults.standard.string(forKey: kLastSizeKey) {
-      let parts = saved.split(separator: "x").compactMap { Int($0) }
-      if parts.count == 2 {
-        _ = createVirtualDisplay(width: parts[0], height: parts[1])
+    rebuildMenu()
+
+    // 自检：HIDPI_DUMP_MENU=1 时打印菜单树并退出，便于在无 GUI 环境下验证
+    if ProcessInfo.processInfo.environment["HIDPI_DUMP_MENU"] == "1" {
+      dump(menu: menu, depth: 0)
+      exit(0)
+    }
+  }
+
+  private func dump(menu: NSMenu, depth: Int) {
+    let indent = String(repeating: "  ", count: depth)
+    for item in menu.items {
+      if item.isSeparatorItem {
+        print("\(indent)---")
+        continue
+      }
+      let mark = item.state == .on ? "[x] " : (item.isEnabled ? "" : "(disabled) ")
+      print("\(indent)\(mark)\(item.title)")
+      if let sub = item.submenu {
+        dump(menu: sub, depth: depth + 1)
       }
     }
-    rebuildMenu()
   }
 
   func applicationWillTerminate(_ notification: Notification) {
     hd_release_virtual_displays()
   }
 
-  // MARK: - 菜单
-
   func menuNeedsUpdate(_ menu: NSMenu) {
     rebuildMenu()
   }
+
+  // MARK: - 菜单构建
 
   private func rebuildMenu() {
     guard let menu = statusItem.menu else { return }
     menu.removeAllItems()
 
-    let header = NSMenuItem(title: createdDisplayID == 0 ? "未连接虚拟屏" : "虚拟屏已连接 · ID \(createdDisplayID)",
-                            action: nil, keyEquivalent: "")
-    header.isEnabled = false
-    menu.addItem(header)
+    // 1. 每块真实显示器的分辨率列表
+    let screens = NSScreen.screens
+    for screen in screens {
+      guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+        continue
+      }
+      let id = CGDirectDisplayID(number.uint32Value)
+      let title = "\(screen.localizedName) — \(currentModeLabel(id))"
+      let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+      item.submenu = resolutionMenu(for: id)
+      menu.addItem(item)
+    }
+
     menu.addItem(.separator())
 
-    // 创建虚拟屏
-    let createItem = NSMenuItem(title: "创建 HiDPI 虚拟屏", action: nil, keyEquivalent: "")
-    let createMenu = NSMenu()
+    // 2. 虚拟屏（可选，用于无头/串流场景）
+    let virtualItem = NSMenuItem(title: "虚拟屏", action: nil, keyEquivalent: "")
+    let virtualMenu = NSMenu()
+    let status = NSMenuItem(
+      title: createdDisplayID == 0 ? "未连接" : "已连接 · ID \(createdDisplayID)",
+      action: nil, keyEquivalent: ""
+    )
+    status.isEnabled = false
+    virtualMenu.addItem(status)
+    virtualMenu.addItem(.separator())
     for preset in presets {
-      let item = NSMenuItem(title: "\(preset.width)×\(preset.height)",
-                            action: #selector(createPreset(_:)),
-                            keyEquivalent: "")
+      let item = NSMenuItem(title: "\(preset.width)×\(preset.height) HiDPI",
+                            action: #selector(createPreset(_:)), keyEquivalent: "")
       item.target = self
       item.representedObject = "\(preset.width)x\(preset.height)"
-      createMenu.addItem(item)
+      virtualMenu.addItem(item)
     }
-    createMenu.addItem(.separator())
+    virtualMenu.addItem(.separator())
     let custom = NSMenuItem(title: "自定义…", action: #selector(createCustom), keyEquivalent: "")
     custom.target = self
-    createMenu.addItem(custom)
-    createItem.submenu = createMenu
-    menu.addItem(createItem)
-
-    // 断开
+    virtualMenu.addItem(custom)
     let disconnect = NSMenuItem(title: "断开虚拟屏", action: #selector(disconnect), keyEquivalent: "")
     disconnect.target = self
     disconnect.isEnabled = createdDisplayID != 0
-    menu.addItem(disconnect)
+    virtualMenu.addItem(disconnect)
+    virtualItem.submenu = virtualMenu
+    menu.addItem(virtualItem)
 
     menu.addItem(.separator())
 
-    // 显示器信息
-    addDisplayInfo(to: menu)
-
-    menu.addItem(.separator())
+    let redetect = NSMenuItem(title: "重新枚举显示器", action: #selector(redetectDisplays), keyEquivalent: "")
+    redetect.target = self
+    menu.addItem(redetect)
 
     let settings = NSMenuItem(title: "打开显示器设置…", action: #selector(openSettings), keyEquivalent: "")
     settings.target = self
     menu.addItem(settings)
 
-    let auto = NSMenuItem(title: "启动时自动连接", action: #selector(toggleAuto), keyEquivalent: "")
+    let auto = NSMenuItem(title: "启动时自动连接虚拟屏", action: #selector(toggleAuto), keyEquivalent: "")
     auto.target = self
     auto.state = connectAtLaunch ? .on : .off
     menu.addItem(auto)
@@ -112,32 +138,84 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     menu.addItem(quit)
   }
 
-  private func addDisplayInfo(to menu: NSMenu) {
-    let screens = NSScreen.screens
-    guard !screens.isEmpty else { return }
-    let title = NSMenuItem(title: "显示器（\(screens.count)）", action: nil, keyEquivalent: "")
+  /// 一块显示器的分辨率列表：按 (宽,高,是否 HiDPI) 去重，取最高刷新率
+  private func resolutionMenu(for displayID: CGDirectDisplayID) -> NSMenu {
     let submenu = NSMenu()
-    for screen in screens {
-      guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
-        continue
-      }
-      let id = CGDirectDisplayID(number.uint32Value)
-      var text = "\(screen.localizedName)"
-      if let mode = CGDisplayCopyDisplayMode(id) {
-        text += " · \(mode.width)×\(mode.height)"
-        if mode.pixelWidth == mode.width * 2 {
-          text += " HiDPI"
-        }
-      }
-      let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
+    let count = hd_display_mode_count(displayID)
+    guard count > 0 else {
+      let item = NSMenuItem(title: "无法读取模式表", action: nil, keyEquivalent: "")
       item.isEnabled = false
       submenu.addItem(item)
+      return submenu
     }
-    title.submenu = submenu
-    menu.addItem(title)
+
+    struct Entry {
+      var index: Int
+      var width: UInt32
+      var height: UInt32
+      var hiDPI: Bool
+      var refresh: Double
+    }
+
+    var byKey: [String: Entry] = [:]
+    for index in 0 ..< Int(count) {
+      var mode = hd_mode_t()
+      guard hd_display_mode_at(displayID, Int32(index), &mode) == 0 else { continue }
+      let key = "\(mode.width)x\(mode.height)x\(mode.hiDPI)"
+      let candidate = Entry(index: index, width: mode.width, height: mode.height,
+                            hiDPI: mode.hiDPI == 1, refresh: mode.refreshRate)
+      if let existing = byKey[key], existing.refresh >= candidate.refresh {
+        continue
+      }
+      byKey[key] = candidate
+    }
+
+    let entries = byKey.values.sorted { lhs, rhs in
+      if lhs.width != rhs.width { return lhs.width < rhs.width }
+      if lhs.height != rhs.height { return lhs.height < rhs.height }
+      return lhs.hiDPI && !rhs.hiDPI
+    }
+
+    // 当前模式（按 宽/高/HiDPI 匹配，不比较刷新率与索引）
+    var currentKey = ""
+    if let current = CGDisplayCopyDisplayMode(displayID) {
+      let hidpi = current.pixelWidth == current.width * 2 ? 1 : 0
+      currentKey = "\(current.width)x\(current.height)x\(hidpi)"
+    }
+
+    for entry in entries {
+      var title = "\(entry.width)×\(entry.height)"
+      if entry.hiDPI { title += "  HiDPI" }
+      title += "  · \(Int(entry.refresh))Hz"
+      let item = NSMenuItem(title: title, action: #selector(switchMode(_:)), keyEquivalent: "")
+      item.target = self
+      item.tag = entry.index
+      item.representedObject = NSNumber(value: displayID)
+      let key = "\(entry.width)x\(entry.height)x\(entry.hiDPI ? 1 : 0)"
+      item.state = key == currentKey ? .on : .off
+      submenu.addItem(item)
+    }
+    return submenu
+  }
+
+  private func currentModeLabel(_ displayID: CGDirectDisplayID) -> String {
+    guard let mode = CGDisplayCopyDisplayMode(displayID) else { return "未知" }
+    let hidpi = mode.pixelWidth == mode.width * 2 ? " HiDPI" : ""
+    return "\(mode.width)×\(mode.height)\(hidpi)"
   }
 
   // MARK: - 动作
+
+  /// 直接切换真实显示器的模式（瞬时生效，不涉及虚拟屏）
+  @objc private func switchMode(_ sender: NSMenuItem) {
+    guard let number = sender.representedObject as? NSNumber else { return }
+    let displayID = number.uint32Value
+    if hd_display_set_mode(displayID, Int32(sender.tag)) != 0 {
+      notify(title: "切换失败", text: "系统拒绝了这次模式切换（可能该分辨率需要重新枚举）。")
+      return
+    }
+    rebuildMenu()
+  }
 
   @objc private func createPreset(_ sender: NSMenuItem) {
     guard let text = sender.representedObject as? String else { return }
@@ -196,6 +274,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     rebuildMenu()
   }
 
+  @objc private func redetectDisplays() {
+    _ = hd_detect_displays()
+    rebuildMenu()
+  }
+
   @objc private func openSettings() {
     if let url = URL(string: "x-apple.systempreferences:com.apple.Displays-Settings.extension") {
       NSWorkspace.shared.open(url)
@@ -213,8 +296,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 // MARK: - 入口
 
-// 单实例保护：已经有同 bundle id 的实例在跑就直接激活它并退出，
-// 否则重复启动会叠出多块虚拟屏。
+// 单实例保护：已有同 bundle id 的实例在跑就激活它并退出
 if let bundleID = Bundle.main.bundleIdentifier {
   let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
     .filter { $0.processIdentifier != getpid() }
