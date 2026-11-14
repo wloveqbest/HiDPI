@@ -9,6 +9,7 @@
 # 用法:
 #   ./scripts/add-custom-resolution.sh <displayID> <逻辑分辨率WxH> [更多WxH...] [--dry-run]
 #   ./scripts/add-custom-resolution.sh <displayID> --remove
+#   ./scripts/add-custom-resolution.sh <displayID> --presets      # 一次注入常用 16:9 档位
 #
 # 例：给 4K 屏增加 1920x1080 与 1600x900 两档 HiDPI
 #   ./scripts/add-custom-resolution.sh 2 1920x1080 1600x900
@@ -40,6 +41,7 @@ for arg in "$@"; do
     --remove) REMOVE=1 ;;
     --dry-run) DRY_RUN=1 ;;
     --no-activate) NO_ACTIVATE=1 ;;
+    --presets) SIZES+=(1280x720 1440x810 1600x900 1920x1080 2048x1152 2304x1296 2560x1440 2880x1620 3008x1692) ;;
     [0-9]*x[0-9]*) SIZES+=("$arg") ;;
     *) echo "无法识别的参数: $arg" >&2; exit 1 ;;
   esac
@@ -82,7 +84,7 @@ if [ "$REMOVE" -eq 1 ]; then
 fi
 
 # 生成 plist：scale-resolutions 里放的是「背衬像素尺寸」，每项 8 字节大端 (width, height)
-PLIST=$(python3 - "$@" <<'PY'
+PLIST=$(python3 - "${SIZES[@]}" <<'PY'
 import struct, sys, plistlib
 
 sizes = []
