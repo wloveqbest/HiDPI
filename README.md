@@ -26,16 +26,23 @@ open dist/HiDPI-0.1.0.dmg        # 拖进 Applications
 
 ## 菜单
 
+每块显示器一个子菜单，分三层，不再平铺几十个模式：
+
 ```
 H27T22C — 1920×1080 HiDPI
-  ├─ 1920×1080  HiDPI · 75Hz
-  ├─ [x] 1920×1080  HiDPI · 75Hz      ← 当前档
-  ├─ 2400×1350  HiDPI · 75Hz          ← 自己注入的
+  ├─ 分辨率 ▸        1440×900 / 1600×900 / 1680×1050 / [x] 1920×1080
+  │                  2048×1152 / 2304×1296 / 2560×1440 / 3840×2160
+  │                  ──────────
+  │                  全部分辨率… ▸   （完整模式表，含 LoDPI/HiDPI 与刷新率）
+  ├─ 刷新率 ▸        [x] 75 Hz        （当前分辨率下可用的刷新率）
+  ├─ ☑ 启用 HiDPI                      （同尺寸在 1x / 2x 间切换）
   └─ 激活（断开重连，黑屏约 2 秒）
-重新枚举显示器
-打开显示器设置…
-退出 HiDPI
 ```
+
+- **分辨率**只列常见尺寸（白名单），同一尺寸只出现一次，选档时自动沿用当前的 HiDPI 状态
+- **刷新率**只列当前分辨率可用的档位
+- **HiDPI** 是开关，不是重复的列表项；某尺寸没有另一种密度时会提示用脚本注入
+- 完整模式表仍在「全部分辨率…」里，没有功能损失
 
 ## 机制：四层，每层都已验证
 
@@ -108,7 +115,7 @@ swift build -c release
 | `hidpi set <id> <索引>` | 立即切换模式 |
 | `hidpi cycle <id> [秒]` | 软件断开/重连显示器（激活 override） |
 | `hidpi activate <id>` | 同 `cycle <id> 2` |
-| `hidpi detect` | `SLSDetectDisplays`（不足以激活 override） |
+| `hidpi detect` | `SLSDetectDisplays`（实测不足以激活 override，仅诊断用） |
 | `hidpi info <id>` | 厂商号/型号号与 override 路径（十进制 + 十六进制） |
 | `hidpi create` | 虚拟屏（`--size/--refresh/--name/--lo/--seconds`） |
 
