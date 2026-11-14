@@ -133,7 +133,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ?? common.first { $0.width == entry.width && $0.height == entry.height && $0.hiDPI == wantHiDPI }
         ?? entry
 
-      let title = "\(entry.width)×\(entry.height)"
+      // 该尺寸若没有 HiDPI 变体，明确标出来（否则开 HiDPI 时会静默落到 LoDPI）
+      let hasHiDPIVariant = common.contains {
+        $0.width == entry.width && $0.height == entry.height && $0.hiDPI
+      }
+      var title = "\(entry.width)×\(entry.height)"
+      if !hasHiDPIVariant {
+        title += "  （无 HiDPI）"
+      }
       let item = NSMenuItem(title: title, action: #selector(selectMode(_:)), keyEquivalent: "")
       item.target = self
       item.tag = variant.index
