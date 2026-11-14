@@ -125,12 +125,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       seenSizes.insert(sizeKey)
 
       let wantHiDPI = current?.hiDPI ?? true
-      let variant = common.first {
-        $0.width == entry.width && $0.height == entry.height && $0.hiDPI == wantHiDPI
-      } ?? entry
+      let sameRate = common.first {
+        $0.width == entry.width && $0.height == entry.height
+          && $0.hiDPI == wantHiDPI && Int($0.refresh.rounded()) == Int((current?.refresh ?? 0).rounded())
+      }
+      let variant = sameRate
+        ?? common.first { $0.width == entry.width && $0.height == entry.height && $0.hiDPI == wantHiDPI }
+        ?? entry
 
-      var title = "\(entry.width)×\(entry.height)"
-      if !variant.hiDPI { title += "  LoDPI" }
+      let title = "\(entry.width)×\(entry.height)"
       let item = NSMenuItem(title: title, action: #selector(selectMode(_:)), keyEquivalent: "")
       item.target = self
       item.tag = variant.index
@@ -165,7 +168,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let refreshItem = NSMenuItem(title: "刷新率", action: nil, keyEquivalent: "")
     let refreshMenu = NSMenu()
     if let current {
-      let candidates = entries.filter {
+      let candidates = rawModes(for: displayID).filter {
         $0.width == current.width && $0.height == current.height && $0.hiDPI == current.hiDPI
       }
       let rates = Set(candidates.map { Int($0.refresh.rounded()) }).sorted()
@@ -230,6 +233,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       if lhs.height != rhs.height { return lhs.height < rhs.height }
       return lhs.hiDPI && !rhs.hiDPI
     }
+  }
+
+  /// 原始模式表（不去重），刷新率菜单要用它，否则只能看到最高刷新率那一档
+  private func rawModes(for displayID: CGDirectDisplayID) -> [ModeEntry] {
+    let count = hd_display_mode_count(displayID)
+    guard count > 0 else { return [] }
+    var modes: [ModeEntry] = []
+    for index in 0 ..< Int(count) {
+      var mode = hd_mode_t()
+      guard hd_display_mode_at(displayID, Int32(index), &mode) == 0 else { continue }
+      modes.append(ModeEntry(index: index, width: mode.width, height: mode.height,
+                             hiDPI: mode.hiDPI == 1, refresh: mode.refreshRate))
+    }
+    return modes
   }
 
   private func currentMode(_ displayID: CGDirectDisplayID) -> ModeEntry? {
