@@ -19,5 +19,10 @@ let package = Package(
       dependencies: ["HDShim"],
       path: "Sources/hidpi"
     ),
+    .executableTarget(
+      name: "HiDPIMenuBar",
+      dependencies: ["HDShim"],
+      path: "Sources/HiDPIMenuBar"
+    ),
   ]
 )

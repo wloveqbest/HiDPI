@@ -1,10 +1,48 @@
-# hidpi — 开源的 macOS HiDPI 命令行工具
+# hidpi — 开源的 macOS HiDPI 工具
 
-用 macOS 私有 `CGVirtualDisplay` API 在内存里造一块 **2x 背衬的虚拟显示器**，从而在任意 Mac 上获得 HiDPI 分辨率选项。这是 BetterDisplay / BetterDummy 最核心的那部分能力，本项目用约 600 行 Swift + ObjC 独立实现，MIT 许可，不需要任何付费授权。
+用 macOS 私有 `CGVirtualDisplay` API 在内存里造一块 **2x 背衬的虚拟显示器**，从而在任意 Mac 上获得 HiDPI 分辨率选项。这是 BetterDisplay / BetterDummy 最核心的那部分能力，本项目用约 900 行 Swift + ObjC 独立实现，MIT 许可，**不需要任何付费授权**。
 
 > 本项目是**独立实现**，不包含、不修改、不绕过任何商业软件的代码或授权校验。机制参考了 BetterDummy 早期开源版（MIT）——详见 [许可与署名](#许可与署名)。
 
-## 功能
+## 两种形态
+
+| 形态 | 路径 | 适合 |
+|---|---|---|
+| **菜单栏 App** | `dist/HiDPI.app`（DMG 同目录） | 日常用：双击即用，点菜单栏图标选分辨率 |
+| 命令行工具 | `hidpi`（同 DMG 内 `hidpi-cli`） | 脚本、launchd 常驻、调试 |
+
+## 安装
+
+```bash
+# 方式一：直接装 DMG 里的 App
+open dist/HiDPI-0.1.0.dmg      # 把 HiDPI 拖进 Applications 即可
+
+# 方式二：自己构建
+./scripts/build-app.sh          # 产出 dist/HiDPI.app 与 dist/HiDPI-0.1.0.dmg
+```
+
+App 只出现在菜单栏（`LSUIElement`，不占 Dock），已做**单实例保护**：重复启动只会激活已有实例，不会叠出多块虚拟屏。
+
+## 菜单栏 App 功能
+
+```
+HiDPI
+├─ 虚拟屏已连接 · ID 6     （状态）
+├─ 创建 HiDPI 虚拟屏 ▸
+│    1280×720 / 1440×810 / 1600×900 / 1728×1117
+│    1920×1080 / 2048×1152 / 2560×1440 / 2880×1620
+│    ──────────
+│    自定义…
+├─ 断开虚拟屏
+├─ 显示器（2）▸            （各屏当前分辨率，含是否 HiDPI）
+├─ 打开显示器设置…
+├─ 启动时自动连接          （勾选后开机即建屏，记住上次尺寸）
+└─ 退出 HiDPI
+```
+
+创建后虚拟屏会出现在「系统设置 > 显示器」里，可正常拖拽排列、设为镜像或扩展。
+
+## 命令行
 
 | 命令 | 作用 |
 |---|---|
@@ -13,27 +51,9 @@
 | `hidpi set <id> <索引>` | 切换到指定模式（走 `CGSConfigureDisplayMode`） |
 | `hidpi create` | 创建 HiDPI 虚拟显示器并保持连接 |
 
-`create` 支持的选项：
+`create` 选项：`--size WxH`（默认 1920x1080）、`--refresh HZ`（默认 60）、`--name NAME`、`--lo`（1x）、`--seconds N`（N 秒后自动断开；不写则运行到 Ctrl-C）。
 
-| 选项 | 说明 |
-|---|---|
-| `--size WxH` | 逻辑分辨率，默认 `1920x1080` |
-| `--refresh HZ` | 刷新率，默认 `60` |
-| `--name NAME` | 显示器名称，默认 `HiDPI Display` |
-| `--lo` | 创建 1x（非 HiDPI）显示 |
-| `--seconds N` | 运行 N 秒后自动断开；不写则运行到 Ctrl-C |
-
-## 构建
-
-需要 macOS 12+ 与 Swift 5.9+（只装 Command Line Tools 即可，不需要完整 Xcode）。
-
-```bash
-cd hidpi
-swift build -c release
-cp .build/release/hidpi /usr/local/bin/     # 可选：装进 PATH
-```
-
-## 实测输出
+### 实测输出
 
 ```
 $ hidpi list
@@ -41,41 +61,23 @@ $ hidpi list
 
 ID        名称                            逻辑            像素            标记
 2         H27T22C                       1920x1080     3840x2160     主屏
-```
 
-```
 $ hidpi create --size 1920x1080 --name "HiDPI Test" --seconds 9
 已创建虚拟显示器
   ID        4
-  名称      HiDPI Test
   逻辑      1920x1080 pt
   背衬      3840x2160 px（HiDPI 2x）
-  刷新率    60 Hz
-
-下一步:
-  hidpi modes 4                 查看可用模式
-  hidpi set 4 <索引>            切换模式
-  系统设置 > 显示器 > 为该虚拟屏选择 HiDPI 档位
-
 已确认 HiDPI 模式: 800x600, 960x540, 1440x810, 1920x1080, ...
 
-9 秒后自动断开…
-```
-
-```
 $ hidpi modes 4
 显示器 4 共 29 个模式，当前索引 14
 
 索引      逻辑          实际像素          刷新      类型
 0       800x600     1600x1200     60      HiDPI
-1       800x600     800x600       60      LoDPI
 2       960x540     1920x1080     60      HiDPI
 ...
-27      960x540     1920x1080     60      HiDPI
 28      1920x1080   1920x1080     60      LoDPI
-```
 
-```
 $ hidpi set 4 0
 已将显示器 4 切换到模式索引 0
 ```
@@ -84,48 +86,28 @@ $ hidpi set 4 0
 
 macOS 的 HiDPI = 逻辑尺寸（point）配 2 倍像素的 backing store，再由合成器降采样到面板物理分辨率。虚拟屏之所以能"无中生有"出 HiDPI，是因为系统对待虚拟显示器和真实显示器一样，会为它的模式表生成 HiDPI 变体。
 
-本项目用到的私有接口（全部在运行时解析，不硬链接私有框架）：
+用到的私有接口（全部运行时解析，不硬链接私有框架）：
 
-- **`CGVirtualDisplay` / `CGVirtualDisplayDescriptor` / `CGVirtualDisplayMode` / `CGVirtualDisplaySettings`**（CoreGraphics 私有类）：造屏并 `applySettings` 提交模式表，`hiDPI = 1` 表示该屏按 2x 渲染。
-- **`CGSGetNumberOfDisplayModes` / `CGSGetDisplayModeDescriptionOfLength` / `CGSGetCurrentDisplayMode` / `CGSConfigureDisplayMode`**（SkyLight 私有 C 函数）：枚举模式与切换模式，经 `dlopen`/`dlsym` 解析。
-- 显示枚举本身用公开 API（`NSScreen` + `CGDisplayCopyDisplayMode`），不依赖私有符号。
+- **`CGVirtualDisplay` / `CGVirtualDisplayDescriptor` / `CGVirtualDisplayMode` / `CGVirtualDisplaySettings`**（CoreGraphics 私有类）：造屏并 `applySettings` 提交模式表，`hiDPI = 1` 表示按 2x 渲染。
+- **`CGSGetNumberOfDisplayModes` / `CGSGetDisplayModeDescriptionOfLength` / `CGSGetCurrentDisplayMode` / `CGSConfigureDisplayMode`**（SkyLight 私有 C 函数）：枚举与切换模式，经 `dlopen`/`dlsym` 解析。
+- 显示枚举本身用公开 API（`NSScreen` + `CGDisplayCopyDisplayMode`）。
 
 物理尺寸按 24 英寸对角线反推，色彩主坐标取自 Generic RGB Profile，使 macOS 算出合理的 DPI 与色彩描述，模式表才会被正常接受。
 
 ## 已知限制
 
-- **虚拟屏与进程同寿命**：进程退出即断开。要常驻请用 launchd，或自己包一层菜单栏 App。
-- **私有 API**：`CGVirtualDisplay` 不受 Apple 支持，macOS 大版本升级可能失效或改变行为。
+- **虚拟屏与进程同寿命**：App 退出即断开；CLI 进程结束即断开。
+- **私有 API**：`CGVirtualDisplay` 不受 Apple 支持，macOS 大版本升级可能失效。
 - **不能跑在 Rosetta 下**（x86_64 转译进程拿不到这些私有服务）。
-- 无 EDID 读写、无 DDC/CI、无亮度控制、无镜像/串流——这些需要 root 助手或额外协议实现，本项目刻意不做。
-- 虚拟屏不会自动成为主屏，也不自动镜像到真实显示器；先在"系统设置 > 显示器"里安排位置。
+- App 是 **ad-hoc 签名**（无开发者证书、未公证）。本机构建不会被 Gatekeeper 拦；如果你把它拷给别人，对方首次打开需要右键 → 打开。
+- 无 EDID 读写、无 DDC/CI、无亮度控制、无镜像/串流。
 
-## 常驻运行（可选）
-
-`~/Library/LaunchAgents/local.hidpi.virtual.plist`：
+## 常驻运行（launchd）
 
 ```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>local.hidpi.virtual</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/usr/local/bin/hidpi</string>
-    <string>create</string>
-    <string>--size</string>
-    <string>1920x1080</string>
-    <string>--name</string>
-    <string>HiDPI</string>
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-</dict>
-</plist>
+~/Library/LaunchAgents/local.hidpi.virtual.plist
+  ProgramArguments: /usr/local/bin/hidpi create --size 1920x1080 --name HiDPI
+  RunAtLoad / KeepAlive: true
 ```
 
 ```bash
@@ -139,12 +121,18 @@ hidpi/
 ├── Package.swift
 ├── LICENSE
 ├── README.md
+├── scripts/
+│   ├── build-app.sh            # 编译 → 组装 .app → 图标 → 签名 → DMG
+│   └── make-icon.swift         # 程序化生成 1024px 图标
+├── dist/                       # 构建产物（HiDPI.app / HiDPI-0.1.0.dmg）
 └── Sources/
-    ├── HDShim/
-    │   ├── include/hd.h        # 稳定的 C 接口
-    │   └── hd.m                # 私有 API 封装（CGVirtualDisplay + CGS）
-    └── hidpi/
-        └── main.swift          # CLI：list / modes / set / create
+    ├── HDShim/                 # 私有 API 封装（C 接口）
+    │   ├── include/hd.h
+    │   └── hd.m
+    ├── hidpi/                  # 命令行
+    │   └── main.swift
+    └── HiDPIMenuBar/           # 菜单栏 App（AppKit）
+        └── main.swift
 ```
 
 ## 许可与署名
