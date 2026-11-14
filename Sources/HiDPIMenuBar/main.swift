@@ -207,8 +207,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     menu.addItem(.separator())
 
-    // 4) 激活（新增分辨率后需要）
-    let activate = NSMenuItem(title: "激活（断开重连，黑屏约 2 秒）",
+    // 4) 让新注入的分辨率生效：WindowServer 只在显示器重连时才重读 override
+    let activate = NSMenuItem(title: "应用新分辨率（重连显示器，黑屏约 2 秒）",
                               action: #selector(activateDisplay(_:)), keyEquivalent: "")
     activate.target = self
     activate.representedObject = NSNumber(value: displayID)
@@ -306,7 +306,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     guard let number = sender.representedObject as? NSNumber else { return }
     let result = hd_cycle_display(number.uint32Value, 2.0)
     if result != 0 {
-      notify(title: "激活失败", text: "错误码 \(result)。若屏幕没有恢复，请拔插一次显示器线缆。")
+      notify(title: "重连失败", text: "错误码 \(result)。若屏幕没有恢复，请拔插一次显示器线缆。")
     }
     rebuildMenu()
   }
