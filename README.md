@@ -1,7 +1,7 @@
 # hidpi — 开源的 macOS 分辨率工具
 
-[![build](https://github.com/wloveqbest/HiDPI/actions/workflows/build.yml/badge.svg)](https://github.com/wloveqbest/HiDPI/actions/workflows/build.yml)
 [![release](https://img.shields.io/github/v/release/wloveqbest/HiDPI)](https://github.com/wloveqbest/HiDPI/releases)
+[![license](https://img.shields.io/github/license/wloveqbest/HiDPI)](LICENSE)
 
 菜单栏里直接切换**真实显示器**的分辨率与颜色描述文件；需要系统没给的尺寸时，注入一条 override，再软件断开/重连显示器让它生效 —— 全程不拔线、不重启、不需要付费授权。
 
