@@ -147,7 +147,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let result = path.map { hd_apply_color_profile(displayID, $0) }
       ?? hd_apply_color_profile(displayID, nil)
     if result != 0 {
-      notify(title: "应用失败", text: "错误码 \(result)")
+      let reason: String
+      switch result {
+      case -5: reason = "该文件不是显示器类 RGB profile，系统会直接拒绝。"
+      case -2: reason = "ColorSync 拒绝了该描述文件。"
+      case -1: reason = "无法获取显示器标识。"
+      default: reason = "错误码 \(result)"
+      }
+      notify(title: "应用失败", text: reason)
       return
     }
     UserDefaults.standard.set(path ?? "", forKey: "profile-\(displayID)")
