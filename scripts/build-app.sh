@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 ROOT="$PWD"
 APP_NAME="HiDPI"
 BUNDLE_ID="pro.local.hidpi"
-VERSION="0.1.0"
+VERSION="0.2.0"
 DIST="$ROOT/dist"
 APP="$DIST/$APP_NAME.app"
 

@@ -9,14 +9,7 @@
 import Cocoa
 import Foundation
 import HDShim
-
-private struct ModeEntry {
-  let index: Int
-  let width: UInt32
-  let height: UInt32
-  let hiDPI: Bool
-  let refresh: Double
-}
+import HiDPICore
 
 private let kSleepPreventionKey = "preventDisplaySleep"
 
@@ -150,13 +143,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var settingsController: SettingsWindowController?
   private var selectedDisplay: CGDirectDisplayID = CGMainDisplayID()
 
-  private let commonSizes: [(UInt32, UInt32)] = [
-    (1280, 800), (1440, 900), (1512, 982), (1600, 900), (1680, 1050),
-    (1728, 1117), (1920, 1080), (1920, 1200), (2048, 1152), (2304, 1296),
-    (2560, 1440), (2560, 1600), (2880, 1620), (3008, 1692), (3200, 1800),
-    (3440, 1440), (3840, 2160),
-  ]
-
   func applicationDidFinishLaunching(_ notification: Notification) {
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     if let button = statusItem.button {
@@ -250,9 +236,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     for screen in NSScreen.screens {
       guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { continue }
       let id = CGDirectDisplayID(number.uint32Value)
-      let clamshell = hd_clamshell_closed()
-      let lidText = clamshell == 1 ? " · 已合盖" : (clamshell == 0 ? " · 开盖" : "")
-      let item = NSMenuItem(title: "\(screen.localizedName) — \(currentModeLabel(id))\(lidText)",
+      let item = NSMenuItem(title: "\(screen.localizedName) — \(DisplayCatalog.describe(DisplayCatalog.current(displayID: id)))\(DisplayCatalog.clamshellText())",
                             action: nil, keyEquivalent: "")
       item.submenu = displayMenu(for: id)
       menu.addItem(item)
@@ -276,7 +260,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
   private func displayMenu(for displayID: CGDirectDisplayID) -> NSMenu {
     let menu = NSMenu()
-    let entries = modeEntries(for: displayID)
+    let entries = DisplayCatalog.deduped(displayID: displayID)
     guard !entries.isEmpty else {
       let item = NSMenuItem(title: "无法读取模式表", action: nil, keyEquivalent: "")
       item.isEnabled = false
@@ -284,16 +268,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       return menu
     }
 
-    let nativePixelSize = nativPanelPixelSize(displayID)
-    let current = currentMode(displayID)
+    let nativePixelSize = DisplayCatalog.nativePixelSize(displayID: displayID)
+    let current = DisplayCatalog.current(displayID: displayID)
     let currentKey = current.map { "\($0.width)x\($0.height)x\($0.hiDPI ? 1 : 0)" } ?? ""
 
     // 分辨率
     let resolutionItem = NSMenuItem(title: "分辨率", action: nil, keyEquivalent: "")
     let resolutionMenu = NSMenu()
-    let common = entries.filter { entry in
-      commonSizes.contains { $0.0 == entry.width && $0.1 == entry.height }
-    }
+    let common = DisplayCatalog.commonModes(displayID: displayID)
     var seenSizes = Set<String>()
     for entry in common {
       let sizeKey = "\(entry.width)x\(entry.height)"
@@ -309,9 +291,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ?? common.first { $0.width == entry.width && $0.height == entry.height && $0.hiDPI == wantHiDPI }
         ?? entry
 
-      let hasHiDPIVariant = common.contains {
-        $0.width == entry.width && $0.height == entry.height && $0.hiDPI
-      }
+      let hasHiDPIVariant = DisplayCatalog.hasHiDPIVariant(
+        width: entry.width, height: entry.height, displayID: displayID)
       var title = "\(entry.width)×\(entry.height)"
       if !hasHiDPIVariant {
         if entry.width == nativePixelSize.width && entry.height == nativePixelSize.height {
@@ -334,7 +315,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let refreshItem = NSMenuItem(title: "刷新率", action: nil, keyEquivalent: "")
     let refreshMenu = NSMenu()
     if let current {
-      let candidates = rawModes(for: displayID).filter {
+      let candidates = DisplayCatalog.rawModes(displayID: displayID).filter {
         $0.width == current.width && $0.height == current.height && $0.hiDPI == current.hiDPI
       }
       let rates = Set(candidates.map { Int($0.refresh.rounded()) }).sorted()
@@ -367,56 +348,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     return menu
   }
 
-  // MARK: - 数据
-
-  private func modeEntries(for displayID: CGDirectDisplayID) -> [ModeEntry] {
-    var byKey: [String: ModeEntry] = [:]
-    for mode in rawModes(for: displayID) {
-      let key = "\(mode.width)x\(mode.height)x\(mode.hiDPI)"
-      if let existing = byKey[key], existing.refresh >= mode.refresh { continue }
-      byKey[key] = mode
-    }
-    return byKey.values.sorted { lhs, rhs in
-      if lhs.width != rhs.width { return lhs.width < rhs.width }
-      if lhs.height != rhs.height { return lhs.height < rhs.height }
-      return lhs.hiDPI && !rhs.hiDPI
-    }
-  }
-
-  private func rawModes(for displayID: CGDirectDisplayID) -> [ModeEntry] {
-    let count = hd_display_mode_count(displayID)
-    guard count > 0 else { return [] }
-    var modes: [ModeEntry] = []
-    for index in 0 ..< Int(count) {
-      var mode = hd_mode_t()
-      guard hd_display_mode_at(displayID, Int32(index), &mode) == 0 else { continue }
-      modes.append(ModeEntry(index: index, width: mode.width, height: mode.height,
-                             hiDPI: mode.hiDPI == 1, refresh: mode.refreshRate))
-    }
-    return modes
-  }
-
-  private func nativPanelPixelSize(_ displayID: CGDirectDisplayID) -> (width: UInt32, height: UInt32) {
-    var best: (width: UInt32, height: UInt32) = (0, 0)
-    for mode in rawModes(for: displayID) where !mode.hiDPI {
-      if mode.width * mode.height > best.width * best.height {
-        best = (mode.width, mode.height)
-      }
-    }
-    return best
-  }
-
-  private func currentMode(_ displayID: CGDirectDisplayID) -> ModeEntry? {
-    guard let mode = CGDisplayCopyDisplayMode(displayID) else { return nil }
-    return ModeEntry(index: -1, width: UInt32(mode.width), height: UInt32(mode.height),
-                     hiDPI: mode.pixelWidth == mode.width * 2, refresh: mode.refreshRate)
-  }
-
-  private func currentModeLabel(_ displayID: CGDirectDisplayID) -> String {
-    guard let current = currentMode(displayID) else { return "未知" }
-    return "\(current.width)×\(current.height)\(current.hiDPI ? " HiDPI" : "")"
-  }
-
   // MARK: - 动作
 
   @objc private func selectMode(_ sender: NSMenuItem) {
@@ -431,13 +362,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   @objc private func toggleHiDPI(_ sender: NSMenuItem) {
     guard let number = sender.representedObject as? NSNumber else { return }
     let displayID = number.uint32Value
-    guard let current = currentMode(displayID) else { return }
-    let target = modeEntries(for: displayID).first {
+    guard let current = DisplayCatalog.current(displayID: displayID) else { return }
+    let target = DisplayCatalog.deduped(displayID: displayID).first {
       $0.width == current.width && $0.height == current.height && $0.hiDPI != current.hiDPI
     }
     guard let target else {
+      let density = current.hiDPI ? "HiDPI" : "LoDPI"
       notify(title: "没有对应的档位",
-             text: "\(current.width)×\(current.height) 只有\(current.hiDPI ? " HiDPI" : " LoDPI")一种密度。")
+             text: "\(current.width)×\(current.height) 只有 \(density) 一种密度。")
       return
     }
     _ = hd_display_set_mode(displayID, Int32(target.index))

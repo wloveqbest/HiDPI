@@ -8,6 +8,7 @@
 import Cocoa
 import Foundation
 import HDShim
+import HiDPICore
 
 // MARK: - 输出辅助
 
@@ -127,31 +128,22 @@ func cmdModes(_ args: [String]) {
     err("用法: hidpi modes <displayID>")
     return
   }
-  let count = hd_display_mode_count(displayID)
-  if count < 0 {
-    err("无法读取模式表（SkyLight 私有符号不可用）")
-    return
-  }
-  if count == 0 {
+  let modes = DisplayCatalog.rawModes(displayID: displayID)
+  guard !modes.isEmpty else {
     err("显示器 \(displayID) 没有返回任何模式")
     return
   }
-  let current = hd_display_current_mode(displayID)
-  print("显示器 \(displayID) 共 \(count) 个模式，当前索引 \(current)\n")
+  let current = DisplayCatalog.current(displayID: displayID)
+  print("显示器 \(displayID) 共 \(modes.count) 个模式，当前 \(DisplayCatalog.describe(current))\n")
   print(pad("索引", 8) + pad("逻辑", 12) + pad("实际像素", 14) + pad("刷新", 8) + "类型")
-  for index in 0 ..< count {
-    var mode = hd_mode_t()
-    if hd_display_mode_at(displayID, Int32(index), &mode) != 0 {
-      continue
-    }
-    let scale = mode.hiDPI == 1 ? 2 : 1
-    let currentMark = Int32(index) == current ? "  ← 当前" : ""
-    let kind = mode.hiDPI == 1 ? "HiDPI" : "LoDPI"
+  for mode in modes {
+    let currentMark = mode.densityKey == current?.densityKey ? "  ← 当前" : ""
+    let kind = mode.hiDPI ? "HiDPI" : "LoDPI"
     print(
-      pad(String(index), 8)
+      pad(String(mode.index), 8)
         + pad("\(mode.width)x\(mode.height)", 12)
-        + pad("\(mode.width * UInt32(scale))x\(mode.height * UInt32(scale))", 14)
-        + pad(String(format: "%.0f", mode.refreshRate), 8)
+        + pad("\(mode.pixelWidth)x\(mode.pixelHeight)", 14)
+        + pad(String(format: "%.0f", mode.refresh), 8)
         + kind + currentMark
     )
   }
@@ -381,20 +373,14 @@ func cmdCreate(_ args: [String]) {
   print("  系统设置 > 显示器 > 为该虚拟屏选择 HiDPI 档位")
 
   let createdID = UInt32(displayID)
-  let modeCount = hd_display_mode_count(createdID)
-  if modeCount > 0 {
-    var hiDPIModes: [String] = []
-    for index in 0 ..< modeCount {
-      var mode = hd_mode_t()
-      if hd_display_mode_at(createdID, Int32(index), &mode) == 0, mode.hiDPI == 1 {
-        hiDPIModes.append("\(mode.width)x\(mode.height)")
-      }
-    }
-    if hiDPIModes.isEmpty {
-      print("\n注意: 该虚拟屏没有暴露 HiDPI 模式（只创建了 LoDPI？）")
-    } else {
-      print("\n已确认 HiDPI 模式: " + hiDPIModes.joined(separator: ", "))
-    }
+  let hidpiModes = DisplayCatalog.rawModes(displayID: createdID)
+    .filter { $0.hiDPI }
+    .map { "\($0.width)x\($0.height)" }
+  if hidpiModes.isEmpty {
+    print("\n注意: 该虚拟屏没有暴露 HiDPI 模式")
+  } else {
+    let unique = Array(Set(hidpiModes)).sorted()
+    print("\n已确认 HiDPI 模式: " + unique.joined(separator: ", "))
   }
 
   if let seconds {
@@ -462,7 +448,7 @@ case "cycle":
 case "activate":
   cmdActivate(Array(arguments.dropFirst()))
 case "version", "--version", "-v":
-  print("hidpi 0.1.0 — MIT License")
+  print("hidpi \(hidpiVersion) — MIT License")
   print("虚拟屏机制参考 BetterDummy OpenSource Edition (MIT, Istvan T.)")
 case "help", "--help", "-h":
   print(usage)

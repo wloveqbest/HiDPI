@@ -17,6 +17,49 @@
 
 上限：HiDPI 背衬约 5120 像素宽。4K 面板上 `2880×1620`（5760×3240）、`3008×1692`（6016×3384）会被系统丢弃，`2560×1440` 及以下是安全的。
 
+## 功能清单
+
+### 菜单栏 App
+
+| # | 功能 | 说明 |
+|---|---|---|
+| 1 | 分辨率切换 | 常见尺寸白名单、按尺寸去重、沿用当前刷新率 |
+| 2 | 缺 HiDPI 标注 | `（无 HiDPI）` / `（原生，1:1 像素）` |
+| 3 | 刷新率切换 | 当前分辨率下的全部档位（含 24/30Hz 影院档） |
+| 4 | HiDPI 开关 | 同尺寸在 1x / 2x 间切换 |
+| 5 | 设置窗口 | 显示器选择 + 颜色描述文件 |
+| 6 | 颜色描述文件 | ColorSync ICC 切换，含「系统默认」 |
+| 7 | 颜色持久化 | 按显示器 ID 保存，唤醒/换屏后自动重放 |
+| 8 | 合盖状态 | 菜单标题显示「开盖 / 已合盖」 |
+| 9 | 防止显示器睡眠 | `IOPMAssertion`，持久化 |
+| 10 | 开机自启动 | LaunchAgent，菜单勾选 |
+| 11 | 单实例保护 | 重复启动只激活已有实例 |
+
+### 命令行 `hidpi`
+
+| 命令 | 功能 |
+|---|---|
+| `list` | 显示器列表（逻辑/像素尺寸） |
+| `modes <id>` | 完整模式表，标注密度与当前项 |
+| `set <id> <index>` | 立即切换 |
+| `info <id>` | vendor/product + override 路径（十进制与十六进制） |
+| `detect` | `SLSDetectDisplays`（诊断用） |
+| `cycle <id> [秒]` | 软件断开/重连，激活 override |
+| `activate <id>` | 同 `cycle <id> 2` |
+| `state` | 合盖状态 |
+| `profiles` / `profile <id> [路径\|default]` | 颜色描述文件 |
+| `create` | 虚拟屏（无头/串流，可选） |
+| `version` / `help` | 版本与帮助 |
+
+### 脚本
+
+| 脚本 | 功能 |
+|---|---|
+| `build-app.sh` | 编译 → .app 组装 → 图标 → ad-hoc 签名 → DMG |
+| `add-custom-resolution.sh` | override 注入（hex+decimal、合并、自动激活、模式表前后对比、`--presets/--remove/--dry-run/--no-activate`） |
+| `make-icon.swift` | 程序化生成 1024px 图标 |
+| `ddc-probe.c` | DDC 只读诊断探针 |
+
 ## 安装
 
 ```bash
@@ -199,6 +242,27 @@ $ hidpi set 2 72
 $ hidpi list
 2   H27T22C   2400x1350   4800x2700   主屏      ← HiDPI，2x 背衬
 ```
+
+## 架构
+
+```
+Sources/
+  HDShim/         薄 C 层，只有头文件暴露接口（hd.h）
+                  ├ 私有 CGS / SLS（dlopen + dlsym，不硬链接）
+                  ├ ColorSync（ICC 应用/查询）
+                  ├ IOKit（AppleClamshellState、IOPMAssertion）
+                  └ CGVirtualDisplay（虚拟屏，CLI 用）
+  HiDPICore/      共享 Swift 模型
+                  └ DisplayCatalog：模式表读取、去重、常见尺寸、原生判定、
+                    密度变体查询、版本号 —— CLI 与 App 共用
+  hidpi/          CLI
+  HiDPIMenuBar/   菜单栏 App
+```
+
+设计约束：
+- **私有符号一律运行时解析**，符号缺失只返回错误码，不会让进程起不来
+- **核心逻辑与 UI 分离**：模式表处理都在 `HiDPICore`，App 只负责菜单/窗口
+- **写系统状态的能力集中在脚本**：`/Library` 写入、override 注入都在 `scripts/` 里走 `sudo`，App 保持无特权
 
 ## 已知限制
 

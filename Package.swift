@@ -15,14 +15,19 @@ let package = Package(
         .linkedFramework("ColorSync"),
       ]
     ),
+    .target(
+      name: "HiDPICore",
+      dependencies: ["HDShim"],
+      path: "Sources/HiDPICore"
+    ),
     .executableTarget(
       name: "hidpi",
-      dependencies: ["HDShim"],
+      dependencies: ["HDShim", "HiDPICore"],
       path: "Sources/hidpi"
     ),
     .executableTarget(
       name: "HiDPIMenuBar",
-      dependencies: ["HDShim"],
+      dependencies: ["HDShim", "HiDPICore"],
       path: "Sources/HiDPIMenuBar"
     ),
   ]
