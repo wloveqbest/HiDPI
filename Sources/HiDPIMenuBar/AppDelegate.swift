@@ -118,7 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     settings.target = self
     menu.addItem(settings)
 
-    let sleepItem = NSMenuItem(title: "防止显示器睡眠", action: #selector(toggleSleepPrevention), keyEquivalent: "")
+    let sleepItem = NSMenuItem(title: "保持屏幕常亮（不自动熄屏）", action: #selector(toggleSleepPrevention), keyEquivalent: "")
     sleepItem.target = self
     sleepItem.state = hd_sleep_prevented() == 1 ? .on : .off
     menu.addItem(sleepItem)
@@ -187,6 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       item.state = (entry.width == current?.width && entry.height == current?.height) ? .on : .off
       resolutionMenu.addItem(item)
     }
+    resolutionMenu.minimumWidth = 280
     resolutionItem.submenu = resolutionMenu
 
     // 刷新率
@@ -212,6 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       item.isEnabled = false
       refreshMenu.addItem(item)
     }
+    refreshMenu.minimumWidth = 280
     refreshItem.submenu = refreshMenu
 
     // HiDPI 开关
