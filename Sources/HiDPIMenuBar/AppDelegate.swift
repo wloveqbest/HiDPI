@@ -95,9 +95,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       onApplyProfile: { [weak self] displayID, path in
         self?.applyProfile(displayID: displayID, path: path)
       },
-      onToggleHDR: { [weak self] displayID in
-        self?.toggleHDR(displayID: displayID)
-      },
       onToggleSleepPrevention: { [weak self] in
         self?.toggleSleepPrevention()
       },
@@ -160,19 +157,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       return
     }
     UserDefaults.standard.set(path ?? "", forKey: "profile-\(displayID)")
-  }
-
-  private func toggleHDR(displayID: CGDirectDisplayID) {
-    let current = hd_hdr_enabled(displayID)
-    let result = hd_hdr_set(displayID, current == 1 ? 0 : 1)
-    switch result {
-    case 0:
-      break
-    case -2:
-      notify(title: "不支持 HDR", text: "当前 HDMI 链路或分辨率不支持 HDR。")
-    default:
-      notify(title: "切换失败", text: "错误码 \(result)")
-    }
   }
 
   private func toggleSleepPrevention() {

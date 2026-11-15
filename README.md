@@ -1,4 +1,4 @@
-# hidpi — 开源的 macOS 分辨率工具
+# hidpi — 开源的 macOS 分辨率工具（v1.0.0）
 
 菜单栏里直接切换**真实显示器**的分辨率；需要系统没提供的尺寸时，注入一条 override，再软件断开/重连显示器让它生效 —— 全程不需要拔线、不需要重启、不需要付费授权。MIT 许可。
 
@@ -177,7 +177,6 @@ swift build -c release
 | `hidpi set <id> <索引>` | 立即切换模式 |
 | `hidpi cycle <id> [秒]` | 软件断开/重连显示器（激活 override） |
 | `hidpi info <id>` | 厂商号/型号号与 override 路径（十进制 + 十六进制） |
-| `hidpi hdr <id> [on\|off]` | 查看/切换 HDR（需链路支持） |
 | `hidpi profiles` | 列出可用的颜色描述文件 |
 | `hidpi profile <id> [路径\|default]` | 查看/应用颜色描述文件 |
 | `hidpi create` | 虚拟屏（`--size/--refresh/--name/--lo/--seconds`） |
@@ -209,6 +208,8 @@ Sources/
                   └ DisplayCatalog：模式表读取、去重、常见尺寸、原生判定、
                     密度变体查询、版本号 —— CLI 与 App 共用
   hidpi/          CLI
+                  ├ main.swift             参数解析与分发
+                  └ Commands.swift         各子命令实现
   HiDPIMenuBar/   菜单栏 App
                   ├ main.swift             入口 + 单实例保护
                   ├ AppDelegate.swift      状态、生命周期、副作用
@@ -236,18 +237,11 @@ Sources/
 | 不碰内建屏 | 无虚拟屏、无内建亮度、无断开内建屏功能 | 减少无效代码与误触 |
 | 登录后自启 | LaunchAgent `LimitLoadToSessionType = Aqua` | 登录后外接屏就绪再应用设置 |
 
-## HDR 与 HDMI 范围
+## HDMI 范围
 
-**HDR** 走 SkyLight 私有接口（`SLSDisplaySupportsHDRMode` / `IsHDRModeEnabled` / `SetHDRModeEnabled`）：
+macOS 没有提供 HDMI 范围（Full / Limited）的接口 —— SkyLight / CoreGraphics 里没有 `SLSDisplaySetHDMIRange` 之类的符号，BetterDisplay 的二进制里也没有（它只有 software quantization）。
 
-- 菜单里「HDR」子菜单会先检测链路能力，不支持时直接说明原因
-- 实测这台机器的 HDMI 链路在 1080p HiDPI 和 3840×2160 下都报告 `supportsHDR = 0`，所以开关处于不可用状态（换 DP 线或换支持 HDR 的输入可能就会亮）
-
-**HDMI 范围（Full / Limited）** 没有系统接口：
-
-- SkyLight / CoreGraphics 里没有 `SLSDisplaySetHDMIRange` 之类的符号（已逐个探测）
-- BetterDisplay 也没有这个功能 —— 它的二进制里只有 software quantization（软件量化），没有 range 相关 API
-- 真要处理"黑位发灰/暗部压死"，只能改显示器 OSD（多数屏有 "HDMI Range / Black Level" 选项）或换线/换口
+如果画面黑位发灰或暗部压死，只能从显示器 OSD 改 `HDMI Range` / `Black Level`，或换 DP 线/接口。
 
 ## 已知限制
 

@@ -9,7 +9,7 @@ import CoreGraphics
 import Foundation
 import HDShim
 
-public let hidpiVersion = "0.2.0"
+public let hidpiVersion = "1.0.0"
 
 /// 模式表里的一条
 public struct DisplayModeInfo: Equatable, Sendable {
