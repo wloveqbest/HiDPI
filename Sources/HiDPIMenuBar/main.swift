@@ -2,7 +2,7 @@
 //  HiDPI 菜单栏 App
 //
 //  机制：CGSConfigureDisplayMode 切模式；CGSConfigureDisplayEnabled 断开/重连激活 override
-//       gamma 表做软件调光；ColorSync 切换 ICC；CGEventTap 绑定 F1/F2
+//       ColorSync 切换 ICC；IOPMAssertion 防止显示器睡眠
 //  私有 API 声明参考 BetterDummy OpenSource Edition (MIT, Copyright (c) 2021 Istvan T.)
 //
 
@@ -18,28 +18,23 @@ private struct ModeEntry {
   let refresh: Double
 }
 
-private let kKeyBindingKey = "brightnessKeyBinding"
 private let kSleepPreventionKey = "preventDisplaySleep"
 
-// MARK: - 设置窗口
+// MARK: - 设置窗口（颜色描述文件）
 
 final class SettingsWindowController: NSWindowController {
   private let displayPopup = NSPopUpButton(frame: .zero, pullsDown: false)
-  private let brightnessSlider = NSSlider(frame: .zero)
-  private let brightnessLabel = NSTextField(labelWithString: "100%")
   private let profilePopup = NSPopUpButton(frame: .zero, pullsDown: false)
-  private let hintLabel = NSTextField(labelWithString: "勾选菜单里的「F1 / F2 调节亮度」后，可用键盘亮度键调整")
 
   private(set) var displayIDs: [CGDirectDisplayID] = []
   private(set) var profilePaths: [String] = [""]
 
-  var onBrightness: ((Float) -> Void)?
   var onProfile: ((String?) -> Void)?
   var onDisplay: ((CGDirectDisplayID) -> Void)?
 
   init() {
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 380, height: 190),
+      contentRect: NSRect(x: 0, y: 0, width: 380, height: 130),
       styleMask: [.titled, .closable],
       backing: .buffered,
       defer: false
@@ -64,8 +59,7 @@ final class SettingsWindowController: NSWindowController {
 
     func row(_ title: String, _ control: NSView) -> NSStackView {
       let label = NSTextField(labelWithString: title)
-      label.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-      label.widthAnchor.constraint(equalToConstant: 84).isActive = true
+      label.widthAnchor.constraint(equalToConstant: 96).isActive = true
       let rowStack = NSStackView(views: [label, control])
       rowStack.orientation = .horizontal
       rowStack.spacing = 8
@@ -74,33 +68,14 @@ final class SettingsWindowController: NSWindowController {
 
     displayPopup.target = self
     displayPopup.action = #selector(displayChanged)
-    displayPopup.widthAnchor.constraint(equalToConstant: 260).isActive = true
-
-    brightnessSlider.minValue = 0.2
-    brightnessSlider.maxValue = 1.0
-    brightnessSlider.target = self
-    brightnessSlider.action = #selector(brightnessChanged)
-    brightnessSlider.isContinuous = true
-    brightnessLabel.widthAnchor.constraint(equalToConstant: 48).isActive = true
-
-    let brightnessRow = NSStackView(views: [brightnessSlider, brightnessLabel])
-    brightnessRow.orientation = .horizontal
-    brightnessRow.spacing = 8
+    displayPopup.widthAnchor.constraint(equalToConstant: 240).isActive = true
 
     profilePopup.target = self
     profilePopup.action = #selector(profileChanged)
-    profilePopup.widthAnchor.constraint(equalToConstant: 260).isActive = true
-
-    hintLabel.font = NSFont.systemFont(ofSize: 11)
-    hintLabel.textColor = .secondaryLabelColor
-    hintLabel.lineBreakMode = .byWordWrapping
-    hintLabel.maximumNumberOfLines = 3
-    hintLabel.preferredMaxLayoutWidth = 340
+    profilePopup.widthAnchor.constraint(equalToConstant: 240).isActive = true
 
     stack.addArrangedSubview(row("显示器", displayPopup))
-    stack.addArrangedSubview(row("亮度", brightnessRow))
     stack.addArrangedSubview(row("颜色描述文件", profilePopup))
-    stack.addArrangedSubview(hintLabel)
 
     NSLayoutConstraint.activate([
       stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 18),
@@ -125,10 +100,6 @@ final class SettingsWindowController: NSWindowController {
     if let index = displayIDs.firstIndex(of: displayID) {
       displayPopup.selectItem(at: index)
     }
-
-    let level = hd_get_brightness(displayID)
-    brightnessSlider.doubleValue = level < 0 ? 1.0 : Double(level)
-    updateBrightnessLabel()
 
     profilePaths = [""]
     profilePopup.removeAllItems()
@@ -158,27 +129,10 @@ final class SettingsWindowController: NSWindowController {
     }
   }
 
-  private func updateBrightnessLabel() {
-    brightnessLabel.stringValue = "\(Int((brightnessSlider.doubleValue * 100).rounded()))%"
-  }
-
-  /// 键盘亮度键调用：按步长调整并同步 UI
-  func nudgeBrightness(by delta: Double) {
-    let next = min(max(brightnessSlider.doubleValue + delta, brightnessSlider.minValue), brightnessSlider.maxValue)
-    brightnessSlider.doubleValue = next
-    updateBrightnessLabel()
-    onBrightness?(Float(next))
-  }
-
   @objc private func displayChanged() {
     let index = displayPopup.indexOfSelectedItem
     guard index >= 0, index < displayIDs.count else { return }
     onDisplay?(displayIDs[index])
-  }
-
-  @objc private func brightnessChanged() {
-    updateBrightnessLabel()
-    onBrightness?(Float(brightnessSlider.doubleValue))
   }
 
   @objc private func profileChanged() {
@@ -189,48 +143,19 @@ final class SettingsWindowController: NSWindowController {
   }
 }
 
-// MARK: - 键盘事件回调
-
-private func brightnessKeyCallback(proxy: CGEventTapProxy,
-                                   type: CGEventType,
-                                   event: CGEvent,
-                                   userInfo: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
-  guard let userInfo else { return Unmanaged.passUnretained(event) }
-  let delegate = Unmanaged<AppDelegate>.fromOpaque(userInfo).takeUnretainedValue()
-
-  if type.rawValue == 0xFFFFFFFE || type.rawValue == 0xFFFFFFFF {
-    delegate.reenableKeyTap()
-    return Unmanaged.passUnretained(event)
-  }
-
-  guard let nsEvent = NSEvent(cgEvent: event),
-        nsEvent.type == .systemDefined,
-        nsEvent.subtype.rawValue == 8 else {
-    return Unmanaged.passUnretained(event)
-  }
-
-  let keyCode = (nsEvent.data1 & 0xFFFF0000) >> 16
-  let isKeyDown = (nsEvent.data1 & 0x0000FF00) >> 8 == 0x0A
-  guard isKeyDown, keyCode == 2 || keyCode == 3 else {
-    return Unmanaged.passUnretained(event)
-  }
-
-  // 注意：不同键盘发出的键码方向可能相反。实测本机 F1(2)=亮、F2(3)=暗，故默认反转
-  let invert = UserDefaults.standard.object(forKey: "brightnessKeysInvertStandard") as? Bool ?? true
-  let step: Float = 0.05
-  let up = keyCode == 3
-  delegate.adjustBrightness(delta: (up != invert) ? step : -step)
-  return nil // 吃掉事件，避免系统同时调内建屏
-}
-
 // MARK: - AppDelegate
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var statusItem: NSStatusItem!
   private var settingsController: SettingsWindowController?
-  private var keyTap: CFMachPort?
-  private var keyTapSource: CFRunLoopSource?
   private var selectedDisplay: CGDirectDisplayID = CGMainDisplayID()
+
+  private let commonSizes: [(UInt32, UInt32)] = [
+    (1280, 800), (1440, 900), (1512, 982), (1600, 900), (1680, 1050),
+    (1728, 1117), (1920, 1080), (1920, 1200), (2048, 1152), (2304, 1296),
+    (2560, 1440), (2560, 1600), (2880, 1620), (3008, 1692), (3200, 1800),
+    (3440, 1440), (3840, 2160),
+  ]
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -245,13 +170,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     statusItem.menu = menu
     rebuildMenu()
 
-    if UserDefaults.standard.bool(forKey: kKeyBindingKey) {
-      installKeyTap()
-    }
     if UserDefaults.standard.bool(forKey: kSleepPreventionKey) {
       _ = hd_prevent_sleep(1)
     }
-    restoreDisplaySettings()
+    restoreColorProfile()
 
     NSWorkspace.shared.notificationCenter.addObserver(
       self, selector: #selector(didWake),
@@ -270,46 +192,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     if ProcessInfo.processInfo.environment["HIDPI_DUMP_MENU"] == "1" {
-      print("keyTap=\(keyTap != nil ? "ok" : "unavailable")")
       dump(menu: menu, depth: 0)
       exit(0)
-    }
-
-    if let value = ProcessInfo.processInfo.environment["HIDPI_BRIGHTNESS"], let level = Float(value) {
-      _ = hd_set_brightness(CGMainDisplayID(), level / 100.0)
-      print("brightness=\(Int(level))%")
-      Thread.sleep(forTimeInterval: 6)
-      exit(0)
-    }
-  }
-
-  @objc private func didWake() {
-    // 唤醒后 macOS 常会重置模式与 gamma，延迟重放一次
-    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-      self?.restoreDisplaySettings()
-      self?.rebuildMenu()
-    }
-  }
-
-  @objc private func screensChanged() {
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-      self?.restoreDisplaySettings()
-      self?.rebuildMenu()
-    }
-  }
-
-  /// 重放保存的亮度与颜色描述文件
-  private func restoreDisplaySettings() {
-    let defaults = UserDefaults.standard
-    for screen in NSScreen.screens {
-      guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { continue }
-      let id = CGDirectDisplayID(number.uint32Value)
-      if let level = defaults.object(forKey: "brightness-\(id)") as? Double {
-        _ = hd_set_brightness(id, Float(level))
-      }
-      if let profile = defaults.string(forKey: "profile-\(id)"), !profile.isEmpty {
-        _ = hd_apply_color_profile(id, profile)
-      }
     }
   }
 
@@ -330,6 +214,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
   }
 
+  // MARK: - 唤醒/换屏
+
+  @objc private func didWake() {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+      self?.restoreColorProfile()
+      self?.rebuildMenu()
+    }
+  }
+
+  @objc private func screensChanged() {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+      self?.restoreColorProfile()
+      self?.rebuildMenu()
+    }
+  }
+
+  private func restoreColorProfile() {
+    let defaults = UserDefaults.standard
+    for screen in NSScreen.screens {
+      guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { continue }
+      let id = CGDirectDisplayID(number.uint32Value)
+      if let profile = defaults.string(forKey: "profile-\(id)"), !profile.isEmpty {
+        _ = hd_apply_color_profile(id, profile)
+      }
+    }
+  }
+
   // MARK: - 菜单
 
   private func rebuildMenu() {
@@ -341,7 +252,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       let id = CGDirectDisplayID(number.uint32Value)
       let clamshell = hd_clamshell_closed()
       let lidText = clamshell == 1 ? " · 已合盖" : (clamshell == 0 ? " · 开盖" : "")
-      let item = NSMenuItem(title: "\(screen.localizedName) — \(currentModeLabel(id))\(lidText)", action: nil, keyEquivalent: "")
+      let item = NSMenuItem(title: "\(screen.localizedName) — \(currentModeLabel(id))\(lidText)",
+                            action: nil, keyEquivalent: "")
       item.submenu = displayMenu(for: id)
       menu.addItem(item)
     }
@@ -356,11 +268,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     sleepItem.target = self
     sleepItem.state = hd_sleep_prevented() == 1 ? .on : .off
     menu.addItem(sleepItem)
-
-    let binding = NSMenuItem(title: "F1 / F2 调节亮度", action: #selector(toggleKeyBinding), keyEquivalent: "")
-    binding.target = self
-    binding.state = UserDefaults.standard.bool(forKey: kKeyBindingKey) ? .on : .off
-    menu.addItem(binding)
 
     menu.addItem(.separator())
     let quit = NSMenuItem(title: "退出 HiDPI", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -381,6 +288,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let current = currentMode(displayID)
     let currentKey = current.map { "\($0.width)x\($0.height)x\($0.hiDPI ? 1 : 0)" } ?? ""
 
+    // 分辨率
     let resolutionItem = NSMenuItem(title: "分辨率", action: nil, keyEquivalent: "")
     let resolutionMenu = NSMenu()
     let common = entries.filter { entry in
@@ -422,6 +330,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     resolutionItem.submenu = resolutionMenu
     menu.addItem(resolutionItem)
 
+    // 刷新率
     let refreshItem = NSMenuItem(title: "刷新率", action: nil, keyEquivalent: "")
     let refreshMenu = NSMenu()
     if let current {
@@ -448,6 +357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     refreshItem.submenu = refreshMenu
     menu.addItem(refreshItem)
 
+    // HiDPI 开关
     let hidpiItem = NSMenuItem(title: "启用 HiDPI", action: #selector(toggleHiDPI(_:)), keyEquivalent: "")
     hidpiItem.target = self
     hidpiItem.representedObject = NSNumber(value: displayID)
@@ -456,13 +366,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     return menu
   }
-
-  private let commonSizes: [(UInt32, UInt32)] = [
-    (1280, 800), (1440, 900), (1512, 982), (1600, 900), (1680, 1050),
-    (1728, 1117), (1920, 1080), (1920, 1200), (2048, 1152), (2304, 1296),
-    (2560, 1440), (2560, 1600), (2880, 1620), (3008, 1692), (3200, 1800),
-    (3440, 1440), (3840, 2160),
-  ]
 
   // MARK: - 数据
 
@@ -544,11 +447,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   @objc private func openSettings() {
     if settingsController == nil {
       settingsController = SettingsWindowController()
-      settingsController?.onBrightness = { [weak self] level in
-        guard let self else { return }
-        _ = hd_set_brightness(self.selectedDisplay, level)
-        UserDefaults.standard.set(Double(level), forKey: "brightness-\(self.selectedDisplay)")
-      }
       settingsController?.onProfile = { [weak self] path in
         guard let self else { return }
         _ = path.map { hd_apply_color_profile(self.selectedDisplay, $0) }
@@ -568,93 +466,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   }
 
   @objc private func toggleSleepPrevention() {
-    let enabled = !(UserDefaults.standard.bool(forKey: kSleepPreventionKey))
+    let enabled = !UserDefaults.standard.bool(forKey: kSleepPreventionKey)
     UserDefaults.standard.set(enabled, forKey: kSleepPreventionKey)
     if hd_prevent_sleep(enabled ? 1 : 0) != 0 {
       notify(title: "设置失败", text: "无法创建防睡眠断言。")
       UserDefaults.standard.set(false, forKey: kSleepPreventionKey)
     }
     rebuildMenu()
-  }
-
-  @objc private func toggleKeyBinding() {
-    let enabled = !UserDefaults.standard.bool(forKey: kKeyBindingKey)
-    UserDefaults.standard.set(enabled, forKey: kKeyBindingKey)
-    if enabled {
-      if !installKeyTap() {
-        UserDefaults.standard.set(false, forKey: kKeyBindingKey)
-        notify(title: "需要辅助功能权限",
-               text: "请在「系统设置 > 隐私与安全性 > 辅助功能」里勾选 HiDPI，然后重新开启。")
-        openAccessibilitySettings()
-      }
-    } else {
-      removeKeyTap()
-    }
-    rebuildMenu()
-  }
-
-  // MARK: - 键盘绑定
-
-  @discardableResult
-  func installKeyTap() -> Bool {
-    guard keyTap == nil else { return true }
-    // NX_SYSDEFINED 在 CGEventType 里没有具名常量，rawValue 固定为 14
-    let systemDefined: CGEventType = CGEventType(rawValue: 14)!
-    let mask = CGEventMask(1 << systemDefined.rawValue)
-    guard let tap = CGEvent.tapCreate(
-      tap: .cgSessionEventTap,
-      place: .headInsertEventTap,
-      options: .defaultTap,
-      eventsOfInterest: mask,
-      callback: brightnessKeyCallback,
-      userInfo: Unmanaged.passUnretained(self).toOpaque()
-    ) else {
-      return false
-    }
-    keyTap = tap
-    let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-    keyTapSource = source
-    CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-    CGEvent.tapEnable(tap: tap, enable: true)
-    return true
-  }
-
-  private func removeKeyTap() {
-    if let tap = keyTap {
-      CGEvent.tapEnable(tap: tap, enable: false)
-      CFMachPortInvalidate(tap)
-    }
-    if let source = keyTapSource {
-      CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
-    }
-    keyTap = nil
-    keyTapSource = nil
-  }
-
-  func reenableKeyTap() {
-    if let tap = keyTap {
-      CGEvent.tapEnable(tap: tap, enable: true)
-    }
-  }
-
-  func adjustBrightness(delta: Float) {
-    DispatchQueue.main.async { [weak self] in
-      guard let self else { return }
-      if let controller = self.settingsController, controller.window?.isVisible == true {
-        controller.nudgeBrightness(by: Double(delta))
-        return
-      }
-      let current = hd_get_brightness(self.selectedDisplay)
-      let next = min(max((current < 0 ? 1.0 : current) + delta, 0.2), 1.0)
-      _ = hd_set_brightness(self.selectedDisplay, next)
-      UserDefaults.standard.set(Double(next), forKey: "brightness-\(self.selectedDisplay)")
-    }
-  }
-
-  private func openAccessibilitySettings() {
-    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-      NSWorkspace.shared.open(url)
-    }
   }
 
   private func notify(title: String, text: String) {

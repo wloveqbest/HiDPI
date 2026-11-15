@@ -37,7 +37,6 @@ hidpi — 开源的 macOS HiDPI 工具
   hidpi cycle <displayID> [秒数]          软件断开/重连显示器（会黑屏，激活 override 用）
   hidpi activate <displayID>             激活 override（等同 cycle <id> 2）
   hidpi info <displayID>                 显示厂商号/型号号（生成 override 用）
-  hidpi brightness <id> [0-100]          查看/设置亮度（gamma 软件调光）
   hidpi state                            显示合盖状态与防睡眠状态
   hidpi profiles                         列出可用的颜色描述文件
   hidpi profile <id> [路径|default]      查看/应用颜色描述文件
@@ -191,32 +190,7 @@ func cmdState() {
   let clamshell = hd_clamshell_closed()
   let label = clamshell == 1 ? "已合盖" : (clamshell == 0 ? "未合盖" : "未知")
   print("合盖状态: \(label)")
-  print("防睡眠断言: \(hd_sleep_prevented() == 1 ? "持有中" : "未持有")")
-}
-
-func cmdBrightness(_ args: [String]) {
-  guard args.count >= 1, let displayID = parseUInt32(args[0]) else {
-    err("用法: hidpi brightness <displayID> [0-100]")
-    return
-  }
-  if args.count == 1 {
-    let value = hd_get_brightness(displayID)
-    if value < 0 {
-      err("读取亮度失败")
-    } else {
-      print("显示器 \(displayID) 当前亮度: \(Int((value * 100).rounded()))%")
-    }
-    return
-  }
-  guard let percent = Double(args[1]), (0 ... 100).contains(percent) else {
-    err("亮度需要 0-100 之间的数字")
-    return
-  }
-  if hd_set_brightness(displayID, Float(percent / 100.0)) != 0 {
-    err("设置亮度失败")
-    return
-  }
-  print("已将显示器 \(displayID) 亮度设为 \(Int(percent))%")
+  print("提示: 防睡眠开关由菜单栏 App 持有，CLI 无法查询")
 }
 
 func cmdProfiles() {
@@ -477,8 +451,6 @@ case "info":
   cmdInfo(Array(arguments.dropFirst()))
 case "state":
   cmdState()
-case "brightness":
-  cmdBrightness(Array(arguments.dropFirst()))
 case "profiles":
   cmdProfiles()
 case "profile":

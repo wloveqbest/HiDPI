@@ -12,7 +12,6 @@
 | 注入自定义分辨率（如 2400×1350 HiDPI） | 是 | ✅ 实测生效（可选，见下文） |
 | 让注入的分辨率生效（`hidpi cycle`，约黑屏 2 秒） | 否 | ✅ 实测 |
 | 开机自启动 | 否 | ✅ 实测 |
-| 屏幕亮度（gamma 软件调光） | 否 | ✅ 实测 |
 | 颜色描述文件（ICC 切换） | 否 | ✅ 实测 |
 | 虚拟屏（无头/串流） | 否 | 仅 CLI 保留，App 已移除 |
 
@@ -40,9 +39,8 @@ H27T22C — 1920×1080 HiDPI
   │                  全部分辨率… ▸   （完整模式表，含 LoDPI/HiDPI 与刷新率）
   ├─ 刷新率 ▸        24 / 30 / 60 / 72 / [x] 75 Hz   （当前分辨率下全部刷新率）
   ├─ ☑ 启用 HiDPI                      （同尺寸在 1x / 2x 间切换）
-设置…                    ← 亮度滑块 + 颜色描述文件，一个窗口里
+设置…                    ← 颜色描述文件
 防止显示器睡眠
-F1 / F2 调节亮度
 ☑ 开机自启动
 打开显示器设置…
 退出 HiDPI
@@ -80,41 +78,31 @@ F1 / F2 调节亮度
 | 合盖状态感知 | `IORegistry` 的 `AppleClamshellState` | 菜单标题显示「开盖 / 已合盖」，`hidpi state` 可查 |
 | 防止显示器睡眠 | `IOPMAssertion`（`PreventUserIdleDisplaySleep`） | 菜单开关，持久化；开启时 `pmset -g assertions` 能看到 `HiDPI: keep display awake` |
 | 唤醒后重放设置 | `NSWorkspace.didWakeNotification` | 唤醒/换屏后延迟 2 秒重放亮度和颜色（macOS 常在这时重置） |
-| 亮度/颜色持久化 | UserDefaults（按显示器 ID） | 登录启动时自动恢复上次的亮度与 ICC |
+| 颜色持久化 | UserDefaults（按显示器 ID） | 登录启动时自动恢复上次的 ICC |
 
 没做的部分（原版有，但对当前场景价值低）：DDC 硬件亮度（本机 I2C 写入被系统拒绝）、软件断开内建屏（你已不用内建屏）、无头虚拟屏（App 里已移除）。
 
-## 设置窗口与键盘亮度键
+## 设置窗口
 
 菜单里的「设置…」打开一个窗口：
 
 ```
-显示器      [ H27T22C  ▾ ]
-亮度        [=======●=====]  72%
-颜色描述文件 [ 系统默认    ▾ ]
+显示器       [ H27T22C  ▾ ]
+颜色描述文件  [ 系统默认  ▾ ]
 ```
 
-- 亮度是连续滑块（20%–100%），拖动即时生效
-- 颜色描述文件取自系统 ICC 列表
-- 多显示器时可切换目标
+多显示器时可切换目标；选择即时生效。
 
-**F1 / F2 绑定**：勾选菜单里的「F1 / F2 调节亮度」后，用 `CGEventTap` 截获键盘亮度键，每次 ±5%，并吃掉事件（否则系统会同时去调内建屏）。没有辅助功能权限时会弹窗引导到「系统设置 > 隐私与安全性 > 辅助功能」授权。
+## 颜色描述文件
 
-## 亮度与颜色
-
-**亮度**走 gamma 表（`CGSetDisplayTransferByTable`），属于软件调光：
-
-- 全显示器通用，不需要 DDC，也不需要 root
-- 会降低输出信号的灰阶，色彩精度不如硬件调光
-- gamma 是**进程级**的：App 退出后自动恢复原始亮度（实测：App 存活时其他进程读到 0.5，退出后回到 1.0）
-- 本机 DDC/CI 写入被系统拒绝（`IOAVServiceWriteI2C` 返回 `0xe0114102`），所以没有做硬件亮度
-
-**颜色描述文件**走 ColorSync：
+走 ColorSync：
 
 - 列出 `/System/Library/ColorSync/Profiles`、`/Library/ColorSync/Profiles`、`~/Library/ColorSync/Profiles` 下的 `.icc/.icm`
 - 应用时调用 `ColorSyncDeviceSetCustomProfiles`，系统会在 `/Library/ColorSync/Profiles/Displays/` 生成 `<显示器>-<UUID>.icc`
-- 「系统默认」= 把自定义项指回工厂 profile（`FactoryProfiles[DeviceDefaultProfileID]`）
+- 「系统默认」= 把自定义项指回工厂 profile
 - 不需要 root
+
+> 亮度调节（gamma 软件调光 + F1/F2 键绑定）已移除：gamma 是进程级的、App 退出即失效，且键拦截需要辅助功能权限，实用性不足。
 
 ## 机制：四层，每层都已验证
 
@@ -194,7 +182,6 @@ swift build -c release
 | `hidpi activate <id>` | 同 `cycle <id> 2` |
 | `hidpi detect` | `SLSDetectDisplays`（实测不足以激活 override，仅诊断用） |
 | `hidpi info <id>` | 厂商号/型号号与 override 路径（十进制 + 十六进制） |
-| `hidpi brightness <id> [0-100]` | 查看/设置亮度（gamma，进程退出即失效） |
 | `hidpi profiles` | 列出可用的颜色描述文件 |
 | `hidpi profile <id> [路径\|default]` | 查看/应用颜色描述文件 |
 | `hidpi create` | 虚拟屏（`--size/--refresh/--name/--lo/--seconds`） |
