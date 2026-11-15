@@ -112,6 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       return menu
     }
 
+    let nativePixelSize = nativPanelPixelSize(displayID)
     let current = currentMode(displayID)
     let currentKey = current.map { "\($0.width)x\($0.height)x\($0.hiDPI ? 1 : 0)" } ?? ""
 
@@ -144,7 +145,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       }
       var title = "\(entry.width)×\(entry.height)"
       if !hasHiDPIVariant {
-        title += "  （无 HiDPI）"
+        // 原生分辨率不需要 HiDPI（1:1 像素映射就是最清晰的），单独措辞
+        if entry.width == nativePixelSize.width && entry.height == nativePixelSize.height {
+          title += "  （原生，1:1 像素）"
+        } else {
+          title += "  （无 HiDPI）"
+        }
       }
       let item = NSMenuItem(title: title, action: #selector(selectMode(_:)), keyEquivalent: "")
       item.target = self
@@ -231,6 +237,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                              hiDPI: mode.hiDPI == 1, refresh: mode.refreshRate))
     }
     return modes
+  }
+
+  /// 面板原生像素尺寸：取最大的 LoDPI 模式（HiDPI 模式是超采样，像素数会超过面板）
+  private func nativPanelPixelSize(_ displayID: CGDirectDisplayID) -> (width: UInt32, height: UInt32) {
+    var best: (width: UInt32, height: UInt32) = (0, 0)
+    for mode in rawModes(for: displayID) where !mode.hiDPI {
+      if mode.width * mode.height > best.width * best.height {
+        best = (mode.width, mode.height)
+      }
+    }
+    return best
   }
 
   private func currentMode(_ displayID: CGDirectDisplayID) -> ModeEntry? {
