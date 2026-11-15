@@ -1,9 +1,8 @@
 //
-//  AppDelegate.swift — 菜单栏 App 主体
+//  AppDelegate.swift — 状态、生命周期与副作用
 //
-//  菜单设计：
-//    单显示器 → 分辨率/刷新率/HiDPI 直接摆在顶层，减少一层嵌套
-//    多显示器 → 收进「显示器 ▸」子菜单，顶层只留全局项
+//  菜单长什么样由 MenuBuilder 决定；这里只负责：
+//  维护状态（防睡眠、自启动、颜色持久化）、响应动作、处理唤醒/换屏。
 //
 
 import Cocoa
@@ -12,13 +11,11 @@ import HDShim
 import HiDPICore
 
 private let kSleepPreventionKey = "preventDisplaySleep"
-private let kLaunchAtLoginKey = "launchAtLogin"
 private let launchAgentLabel = "pro.local.hidpi"
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var statusItem: NSStatusItem!
-  private var selectedDisplay: CGDirectDisplayID = CGMainDisplayID()
-  private var isRebuilding = false
+  private var menuRouter: MenuActionRouter?
 
   // MARK: - 生命周期
 
@@ -32,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     let menu = NSMenu()
     menu.delegate = self
+    menu.autoenablesItems = false
     statusItem.menu = menu
     rebuildMenu()
 
@@ -59,208 +57,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     _ = hd_prevent_sleep(0)
   }
 
-  /// 只在菜单即将打开时构建一次。
-  /// 之前用 menuNeedsUpdate，悬停子菜单时 AppKit 会反复触发，导致整表销毁重建、子菜单跳动。
+  /// 只在打开前构建一次；悬停子菜单时不重建，避免跳动
   func menuWillOpen(_ menu: NSMenu) {
     rebuildMenu()
   }
 
-  // MARK: - 菜单构建
+  // MARK: - 菜单
 
   private func rebuildMenu() {
-    guard let menu = statusItem.menu, !isRebuilding else { return }
-    isRebuilding = true
-    defer { isRebuilding = false }
+    guard let menu = statusItem.menu else { return }
     menu.removeAllItems()
 
-    let displays = DisplayCatalog.attachedDisplays()
+    let router = MenuActionRouter()
+    menuRouter = router
 
-    // 顶部状态行（不可点）
-    let header = NSMenuItem(title: headerText(displays: displays), action: nil, keyEquivalent: "")
-    header.isEnabled = false
-    menu.addItem(header)
-    menu.addItem(.separator())
-
-    if displays.count == 1, let single = displays.first {
-      for item in displayItems(for: single.id) {
-        menu.addItem(item)
-      }
-    } else {
-      let displaysMenu = NSMenuItem(title: "显示器（\(displays.count)）", action: nil, keyEquivalent: "")
-      let submenu = NSMenu()
-      for display in displays {
-        let displayItem = NSMenuItem(
-          title: "\(display.name) — \(DisplayCatalog.describe(DisplayCatalog.current(displayID: display.id)))",
-          action: nil, keyEquivalent: ""
-        )
-        let inner = NSMenu()
-        for item in displayItems(for: display.id) {
-          inner.addItem(item)
-        }
-        displayItem.submenu = inner
-        submenu.addItem(displayItem)
-      }
-      displaysMenu.submenu = submenu
-      menu.addItem(displaysMenu)
+    let displays = DisplayCatalog.attachedDisplays().map { display -> MenuDisplay in
+      let current = DisplayCatalog.current(displayID: display.id)
+      return MenuDisplay(
+        id: display.id,
+        name: display.name,
+        modeText: DisplayCatalog.describe(current),
+        refresh: current.map { Int($0.refresh.rounded()) } ?? 0
+      )
     }
 
-    menu.addItem(.separator())
+    let state = MenuState(
+      displays: displays,
+      clamshellText: DisplayCatalog.clamshellText(),
+      sleepPreventionOn: hd_sleep_prevented() == 1,
+      launchAtLoginOn: launchAgentExists()
+    )
 
-    let sleepItem = NSMenuItem(title: "保持屏幕常亮（不自动熄屏）", action: #selector(toggleSleepPrevention), keyEquivalent: "")
-    sleepItem.target = self
-    sleepItem.state = hd_sleep_prevented() == 1 ? .on : .off
-    menu.addItem(sleepItem)
-
-    let launchItem = NSMenuItem(title: "开机自启动", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
-    launchItem.target = self
-    launchItem.state = launchAgentExists() ? .on : .off
-    menu.addItem(launchItem)
-
-    menu.addItem(.separator())
-    let quit = NSMenuItem(title: "退出 HiDPI", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-    menu.addItem(quit)
-  }
-
-  private func headerText(displays: [(id: CGDirectDisplayID, name: String)]) -> String {
-    guard let first = displays.first else { return "没有检测到显示器" }
-    let current = DisplayCatalog.current(displayID: first.id)
-    let mode = DisplayCatalog.describe(current)
-    let rate = current.map { " · \(Int($0.refresh.rounded()))Hz" } ?? ""
-    let name = displays.count == 1 ? first.name : "\(displays.count) 块显示器"
-    return "\(name) · \(mode)\(rate)\(DisplayCatalog.clamshellText())"
-  }
-
-  /// 单块显示器的可操作项：分辨率 / 刷新率 / HiDPI
-  private func displayItems(for displayID: CGDirectDisplayID) -> [NSMenuItem] {
-    let entries = DisplayCatalog.deduped(displayID: displayID)
-    guard !entries.isEmpty else {
-      let item = NSMenuItem(title: "无法读取模式表", action: nil, keyEquivalent: "")
-      item.isEnabled = false
-      return [item]
-    }
-
-    let nativePixelSize = DisplayCatalog.nativePixelSize(displayID: displayID)
-    let current = DisplayCatalog.current(displayID: displayID)
-
-    // 分辨率
-    let resolutionItem = NSMenuItem(title: "分辨率", action: nil, keyEquivalent: "")
-    let resolutionMenu = NSMenu()
-    let common = DisplayCatalog.commonModes(displayID: displayID)
-    var seenSizes = Set<String>()
-    for entry in common {
-      if seenSizes.contains(entry.sizeKey) { continue }
-      seenSizes.insert(entry.sizeKey)
-
-      let wantHiDPI = current?.hiDPI ?? true
-      let sameRate = common.first {
-        $0.width == entry.width && $0.height == entry.height
-          && $0.hiDPI == wantHiDPI && Int($0.refresh.rounded()) == Int((current?.refresh ?? 0).rounded())
+    let items = MenuBuilder.build(
+      state: state,
+      router: router,
+      onSelectMode: { [weak self] displayID, index in
+        self?.selectMode(displayID: displayID, index: index)
+      },
+      onToggleHiDPI: { [weak self] displayID in
+        self?.toggleHiDPI(displayID: displayID)
+      },
+      onApplyProfile: { [weak self] displayID, path in
+        self?.applyProfile(displayID: displayID, path: path)
+      },
+      onToggleSleepPrevention: { [weak self] in
+        self?.toggleSleepPrevention()
+      },
+      onToggleLaunchAtLogin: { [weak self] in
+        self?.toggleLaunchAtLogin()
       }
-      let variant = sameRate
-        ?? common.first { $0.width == entry.width && $0.height == entry.height && $0.hiDPI == wantHiDPI }
-        ?? entry
+    )
 
-      let hasHiDPI = DisplayCatalog.hasHiDPIVariant(width: entry.width, height: entry.height,
-                                                    displayID: displayID)
-      var title = "\(entry.width)×\(entry.height)"
-      if !hasHiDPI {
-        let isNative = entry.width == nativePixelSize.width && entry.height == nativePixelSize.height
-        title += isNative ? "  （原生，1:1 像素）" : "  （无 HiDPI）"
-      }
-
-      let item = NSMenuItem(title: title, action: #selector(selectMode(_:)), keyEquivalent: "")
-      item.target = self
-      item.tag = variant.index
-      item.representedObject = NSNumber(value: displayID)
-      item.state = (entry.width == current?.width && entry.height == current?.height) ? .on : .off
-      resolutionMenu.addItem(item)
+    for item in items {
+      menu.addItem(item)
     }
-    resolutionMenu.minimumWidth = 280
-    resolutionItem.submenu = resolutionMenu
-
-    // 刷新率
-    let refreshItem = NSMenuItem(title: "刷新率", action: nil, keyEquivalent: "")
-    let refreshMenu = NSMenu()
-    if let current {
-      let candidates = DisplayCatalog.rawModes(displayID: displayID).filter {
-        $0.width == current.width && $0.height == current.height && $0.hiDPI == current.hiDPI
-      }
-      let rates = Set(candidates.map { Int($0.refresh.rounded()) }).sorted()
-      for rate in rates {
-        guard let match = candidates.first(where: { Int($0.refresh.rounded()) == rate }) else { continue }
-        let item = NSMenuItem(title: "\(rate) Hz", action: #selector(selectMode(_:)), keyEquivalent: "")
-        item.target = self
-        item.tag = match.index
-        item.representedObject = NSNumber(value: displayID)
-        item.state = rate == Int(current.refresh.rounded()) ? .on : .off
-        refreshMenu.addItem(item)
-      }
-    }
-    if refreshMenu.items.isEmpty {
-      let item = NSMenuItem(title: "只有一个刷新率", action: nil, keyEquivalent: "")
-      item.isEnabled = false
-      refreshMenu.addItem(item)
-    }
-    refreshMenu.minimumWidth = 280
-    refreshItem.submenu = refreshMenu
-
-    // HiDPI 开关
-    let hidpiItem = NSMenuItem(title: "启用 HiDPI", action: #selector(toggleHiDPI(_:)), keyEquivalent: "")
-    hidpiItem.target = self
-    hidpiItem.representedObject = NSNumber(value: displayID)
-    hidpiItem.state = current?.hiDPI == true ? .on : .off
-
-    // 颜色描述文件
-    let profileItem = NSMenuItem(title: "颜色描述文件", action: nil, keyEquivalent: "")
-    profileItem.submenu = colorProfileMenu(for: displayID)
-
-    return [resolutionItem, refreshItem, hidpiItem, profileItem]
-  }
-
-  private func colorProfileMenu(for displayID: CGDirectDisplayID) -> NSMenu {
-    let menu = NSMenu()
-    menu.minimumWidth = 280
-
-    var currentPointer = hd_current_color_profile(displayID)
-    let currentProfile = currentPointer.map { String(cString: $0) }
-    if let currentPointer { free(currentPointer) }
-
-    let defaultItem = NSMenuItem(title: "系统默认", action: #selector(applyProfile(_:)), keyEquivalent: "")
-    defaultItem.target = self
-    defaultItem.representedObject = "\(displayID)|"
-    defaultItem.state = currentProfile == nil ? .on : .off
-    menu.addItem(defaultItem)
-    menu.addItem(.separator())
-
-    var paths: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
-    var count: Int32 = 0
-    if hd_list_color_profiles(&paths, &count) == 0, let paths {
-      defer { hd_free_profiles(paths, count) }
-      for index in 0 ..< Int(count) {
-        guard let cString = paths[index] else { continue }
-        let path = String(cString: cString)
-        let item = NSMenuItem(title: (path as NSString).lastPathComponent,
-                              action: #selector(applyProfile(_:)), keyEquivalent: "")
-        item.target = self
-        item.representedObject = "\(displayID)|\(path)"
-        item.state = path == currentProfile ? .on : .off
-        menu.addItem(item)
-      }
-    }
-    return menu
-  }
-
-  @objc private func applyProfile(_ sender: NSMenuItem) {
-    guard let payload = sender.representedObject as? String else { return }
-    let parts = payload.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
-    guard let displayID = UInt32(parts[0]) else { return }
-    let path = parts.count > 1 ? String(parts[1]) : ""
-    let result = path.isEmpty ? hd_apply_color_profile(displayID, nil) : hd_apply_color_profile(displayID, path)
-    if result != 0 {
-      notify(title: "应用失败", text: "错误码 \(result)")
-      return
-    }
-    UserDefaults.standard.set(path, forKey: "profile-\(displayID)")
   }
 
   private func dump(menu: NSMenu, depth: Int) {
@@ -273,6 +123,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       let mark = item.state == .on ? "[x] " : (item.isEnabled ? "" : "(disabled) ")
       print("\(indent)\(mark)\(item.title)")
       if let sub = item.submenu { dump(menu: sub, depth: depth + 1) }
+    }
+  }
+
+  // MARK: - 动作
+
+  private func selectMode(displayID: CGDirectDisplayID, index: Int) {
+    if hd_display_set_mode(displayID, Int32(index)) != 0 {
+      notify(title: "切换失败", text: "系统拒绝了这次模式切换。")
+    }
+  }
+
+  private func toggleHiDPI(displayID: CGDirectDisplayID) {
+    guard let current = DisplayCatalog.current(displayID: displayID) else { return }
+    let target = DisplayCatalog.deduped(displayID: displayID).first {
+      $0.width == current.width && $0.height == current.height && $0.hiDPI != current.hiDPI
+    }
+    guard let target else {
+      let density = current.hiDPI ? "HiDPI" : "LoDPI"
+      notify(title: "没有对应的档位", text: "\(current.width)×\(current.height) 只有 \(density) 一种密度。")
+      return
+    }
+    _ = hd_display_set_mode(displayID, Int32(target.index))
+  }
+
+  private func applyProfile(displayID: CGDirectDisplayID, path: String?) {
+    let result = path.map { hd_apply_color_profile(displayID, $0) }
+      ?? hd_apply_color_profile(displayID, nil)
+    if result != 0 {
+      notify(title: "应用失败", text: "错误码 \(result)")
+      return
+    }
+    UserDefaults.standard.set(path ?? "", forKey: "profile-\(displayID)")
+  }
+
+  private func toggleSleepPrevention() {
+    let enabled = !UserDefaults.standard.bool(forKey: kSleepPreventionKey)
+    UserDefaults.standard.set(enabled, forKey: kSleepPreventionKey)
+    if hd_prevent_sleep(enabled ? 1 : 0) != 0 {
+      UserDefaults.standard.set(false, forKey: kSleepPreventionKey)
+      notify(title: "设置失败", text: "无法创建防睡眠断言。")
     }
   }
 
@@ -299,39 +189,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
   }
 
-  // MARK: - 动作
-
-  @objc private func selectMode(_ sender: NSMenuItem) {
-    guard let number = sender.representedObject as? NSNumber else { return }
-    if hd_display_set_mode(number.uint32Value, Int32(sender.tag)) != 0 {
-      notify(title: "切换失败", text: "系统拒绝了这次模式切换。")
-    }
-  }
-
-  @objc private func toggleHiDPI(_ sender: NSMenuItem) {
-    guard let number = sender.representedObject as? NSNumber else { return }
-    let displayID = number.uint32Value
-    guard let current = DisplayCatalog.current(displayID: displayID) else { return }
-    let target = DisplayCatalog.deduped(displayID: displayID).first {
-      $0.width == current.width && $0.height == current.height && $0.hiDPI != current.hiDPI
-    }
-    guard let target else {
-      let density = current.hiDPI ? "HiDPI" : "LoDPI"
-      notify(title: "没有对应的档位", text: "\(current.width)×\(current.height) 只有 \(density) 一种密度。")
-      return
-    }
-    _ = hd_display_set_mode(displayID, Int32(target.index))
-  }
-
-  @objc private func toggleSleepPrevention() {
-    let enabled = !UserDefaults.standard.bool(forKey: kSleepPreventionKey)
-    UserDefaults.standard.set(enabled, forKey: kSleepPreventionKey)
-    if hd_prevent_sleep(enabled ? 1 : 0) != 0 {
-      notify(title: "设置失败", text: "无法创建防睡眠断言。")
-      UserDefaults.standard.set(false, forKey: kSleepPreventionKey)
-    }
-  }
-
   // MARK: - 开机自启动（LaunchAgent）
 
   private var launchAgentURL: URL {
@@ -343,7 +200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     FileManager.default.fileExists(atPath: launchAgentURL.path)
   }
 
-  @objc private func toggleLaunchAtLogin() {
+  private func toggleLaunchAtLogin() {
     if launchAgentExists() {
       disableLaunchAtLogin()
     } else {
@@ -374,9 +231,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
   private func disableLaunchAtLogin() {
     try? FileManager.default.removeItem(at: launchAgentURL)
-    // 当前进程若不是由该 job 启动，才卸载，避免把自己杀掉
-    let current = launchctlOutput(["print", "gui/\(getuid())/\(launchAgentLabel)"]) ?? ""
-    let pidLine = current.split(separator: "\n").first { $0.contains("pid = ") }
+    let output = launchctlOutput(["print", "gui/\(getuid())/\(launchAgentLabel)"]) ?? ""
+    let pidLine = output.split(separator: "\n").first { $0.contains("pid = ") }
     let jobPID = pidLine.flatMap { Int($0.split(separator: "=").last?.trimmingCharacters(in: .whitespaces) ?? "") }
     if jobPID != Int(getpid()) {
       launchctl(["bootout", "gui/\(getuid())/\(launchAgentLabel)"])
