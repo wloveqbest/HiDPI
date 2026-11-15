@@ -19,6 +19,7 @@ private struct ModeEntry {
 }
 
 private let kKeyBindingKey = "brightnessKeyBinding"
+private let kSleepPreventionKey = "preventDisplaySleep"
 
 // MARK: - 设置窗口
 
@@ -247,6 +248,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     if UserDefaults.standard.bool(forKey: kKeyBindingKey) {
       installKeyTap()
     }
+    if UserDefaults.standard.bool(forKey: kSleepPreventionKey) {
+      _ = hd_prevent_sleep(1)
+    }
+    restoreDisplaySettings()
+
+    NSWorkspace.shared.notificationCenter.addObserver(
+      self, selector: #selector(didWake),
+      name: NSWorkspace.didWakeNotification, object: nil
+    )
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(screensChanged),
+      name: NSApplication.didChangeScreenParametersNotification, object: nil
+    )
 
     if ProcessInfo.processInfo.environment["HIDPI_DUMP_WINDOW"] == "1" {
       openSettings()
@@ -266,6 +280,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       print("brightness=\(Int(level))%")
       Thread.sleep(forTimeInterval: 6)
       exit(0)
+    }
+  }
+
+  @objc private func didWake() {
+    // 唤醒后 macOS 常会重置模式与 gamma，延迟重放一次
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+      self?.restoreDisplaySettings()
+      self?.rebuildMenu()
+    }
+  }
+
+  @objc private func screensChanged() {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+      self?.restoreDisplaySettings()
+      self?.rebuildMenu()
+    }
+  }
+
+  /// 重放保存的亮度与颜色描述文件
+  private func restoreDisplaySettings() {
+    let defaults = UserDefaults.standard
+    for screen in NSScreen.screens {
+      guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { continue }
+      let id = CGDirectDisplayID(number.uint32Value)
+      if let level = defaults.object(forKey: "brightness-\(id)") as? Double {
+        _ = hd_set_brightness(id, Float(level))
+      }
+      if let profile = defaults.string(forKey: "profile-\(id)"), !profile.isEmpty {
+        _ = hd_apply_color_profile(id, profile)
+      }
     }
   }
 
@@ -295,7 +339,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     for screen in NSScreen.screens {
       guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { continue }
       let id = CGDirectDisplayID(number.uint32Value)
-      let item = NSMenuItem(title: "\(screen.localizedName) — \(currentModeLabel(id))", action: nil, keyEquivalent: "")
+      let clamshell = hd_clamshell_closed()
+      let lidText = clamshell == 1 ? " · 已合盖" : (clamshell == 0 ? " · 开盖" : "")
+      let item = NSMenuItem(title: "\(screen.localizedName) — \(currentModeLabel(id))\(lidText)", action: nil, keyEquivalent: "")
       item.submenu = displayMenu(for: id)
       menu.addItem(item)
     }
@@ -305,6 +351,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let settings = NSMenuItem(title: "设置…", action: #selector(openSettings), keyEquivalent: ",")
     settings.target = self
     menu.addItem(settings)
+
+    let sleepItem = NSMenuItem(title: "防止显示器睡眠", action: #selector(toggleSleepPrevention), keyEquivalent: "")
+    sleepItem.target = self
+    sleepItem.state = hd_sleep_prevented() == 1 ? .on : .off
+    menu.addItem(sleepItem)
 
     let binding = NSMenuItem(title: "F1 / F2 调节亮度", action: #selector(toggleKeyBinding), keyEquivalent: "")
     binding.target = self
@@ -496,11 +547,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       settingsController?.onBrightness = { [weak self] level in
         guard let self else { return }
         _ = hd_set_brightness(self.selectedDisplay, level)
+        UserDefaults.standard.set(Double(level), forKey: "brightness-\(self.selectedDisplay)")
       }
       settingsController?.onProfile = { [weak self] path in
         guard let self else { return }
         _ = path.map { hd_apply_color_profile(self.selectedDisplay, $0) }
           ?? hd_apply_color_profile(self.selectedDisplay, nil)
+        UserDefaults.standard.set(path ?? "", forKey: "profile-\(self.selectedDisplay)")
       }
       settingsController?.onDisplay = { [weak self] id in
         guard let self else { return }
@@ -512,6 +565,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     settingsController?.reload(selected: selectedDisplay)
     settingsController?.showWindow(nil)
     NSApp.activate(ignoringOtherApps: true)
+  }
+
+  @objc private func toggleSleepPrevention() {
+    let enabled = !(UserDefaults.standard.bool(forKey: kSleepPreventionKey))
+    UserDefaults.standard.set(enabled, forKey: kSleepPreventionKey)
+    if hd_prevent_sleep(enabled ? 1 : 0) != 0 {
+      notify(title: "设置失败", text: "无法创建防睡眠断言。")
+      UserDefaults.standard.set(false, forKey: kSleepPreventionKey)
+    }
+    rebuildMenu()
   }
 
   @objc private func toggleKeyBinding() {
@@ -584,6 +647,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       let current = hd_get_brightness(self.selectedDisplay)
       let next = min(max((current < 0 ? 1.0 : current) + delta, 0.2), 1.0)
       _ = hd_set_brightness(self.selectedDisplay, next)
+      UserDefaults.standard.set(Double(next), forKey: "brightness-\(self.selectedDisplay)")
     }
   }
 

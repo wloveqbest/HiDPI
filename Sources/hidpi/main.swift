@@ -38,6 +38,7 @@ hidpi — 开源的 macOS HiDPI 工具
   hidpi activate <displayID>             激活 override（等同 cycle <id> 2）
   hidpi info <displayID>                 显示厂商号/型号号（生成 override 用）
   hidpi brightness <id> [0-100]          查看/设置亮度（gamma 软件调光）
+  hidpi state                            显示合盖状态与防睡眠状态
   hidpi profiles                         列出可用的颜色描述文件
   hidpi profile <id> [路径|default]      查看/应用颜色描述文件
   hidpi version                          版本信息
@@ -184,6 +185,13 @@ func cmdInfo(_ args: [String]) {
   print("  厂商号   0x\(String(vendor, radix: 16)) (\(vendor))")
   print("  型号号   0x\(String(product, radix: 16)) (\(product))")
   print("  Override 路径  /Library/Displays/Contents/Resources/Overrides/DisplayVendorID-\(vendor)/DisplayProductID-\(product)")
+}
+
+func cmdState() {
+  let clamshell = hd_clamshell_closed()
+  let label = clamshell == 1 ? "已合盖" : (clamshell == 0 ? "未合盖" : "未知")
+  print("合盖状态: \(label)")
+  print("防睡眠断言: \(hd_sleep_prevented() == 1 ? "持有中" : "未持有")")
 }
 
 func cmdBrightness(_ args: [String]) {
@@ -467,6 +475,8 @@ case "create":
   cmdCreate(Array(arguments.dropFirst()))
 case "info":
   cmdInfo(Array(arguments.dropFirst()))
+case "state":
+  cmdState()
 case "brightness":
   cmdBrightness(Array(arguments.dropFirst()))
 case "profiles":

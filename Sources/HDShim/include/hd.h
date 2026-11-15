@@ -39,6 +39,14 @@ int hd_apply_color_profile(uint32_t displayID, const char *path);
 /// 当前生效的自定义 profile 路径（调用方负责 free），无则 NULL
 char *hd_current_color_profile(uint32_t displayID);
 
+/// 是否合盖（读取 IORegistry 的 AppleClamshellState）；-1 表示未知
+int hd_clamshell_closed(void);
+
+/// 防睡眠断言（IOPMAssertion）：1 开启、0 关闭；返回 0 成功
+int hd_prevent_sleep(int enable);
+/// 当前是否持有防睡眠断言
+int hd_sleep_prevented(void);
+
 int hd_display_mode_count(uint32_t displayID);
 int hd_display_mode_at(uint32_t displayID, int index, hd_mode_t *out);
 int hd_display_current_mode(uint32_t displayID);

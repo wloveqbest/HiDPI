@@ -41,6 +41,7 @@ H27T22C — 1920×1080 HiDPI
   ├─ 刷新率 ▸        24 / 30 / 60 / 72 / [x] 75 Hz   （当前分辨率下全部刷新率）
   ├─ ☑ 启用 HiDPI                      （同尺寸在 1x / 2x 间切换）
 设置…                    ← 亮度滑块 + 颜色描述文件，一个窗口里
+防止显示器睡眠
 F1 / F2 调节亮度
 ☑ 开机自启动
 打开显示器设置…
@@ -69,6 +70,19 @@ F1 / F2 调节亮度
 勾选时写入并 `launchctl bootstrap`，取消勾选则删除文件并 `launchctl bootout`。因为是 LSUIElement App，登录后只出现菜单栏图标，不弹窗口。
 
 > 只对「登录」生效，不是开机前。换 App 位置（不再是 /Applications）后需要重新勾选一次，让路径更新。
+
+## 合盖 / 只用外接屏
+
+针对"合上盖子、只用外接显示器"的用法，做了四件事（对应 BetterDisplay 的同类功能）：
+
+| 能力 | 实现 | 说明 |
+|---|---|---|
+| 合盖状态感知 | `IORegistry` 的 `AppleClamshellState` | 菜单标题显示「开盖 / 已合盖」，`hidpi state` 可查 |
+| 防止显示器睡眠 | `IOPMAssertion`（`PreventUserIdleDisplaySleep`） | 菜单开关，持久化；开启时 `pmset -g assertions` 能看到 `HiDPI: keep display awake` |
+| 唤醒后重放设置 | `NSWorkspace.didWakeNotification` | 唤醒/换屏后延迟 2 秒重放亮度和颜色（macOS 常在这时重置） |
+| 亮度/颜色持久化 | UserDefaults（按显示器 ID） | 登录启动时自动恢复上次的亮度与 ICC |
+
+没做的部分（原版有，但对当前场景价值低）：DDC 硬件亮度（本机 I2C 写入被系统拒绝）、软件断开内建屏（你已不用内建屏）、无头虚拟屏（App 里已移除）。
 
 ## 设置窗口与键盘亮度键
 
