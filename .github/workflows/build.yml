@@ -1,0 +1,39 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 构建 .app 与 DMG
+        run: ./scripts/build-app.sh
+
+      - name: 冒烟测试
+        run: |
+          set -e
+          .build/release/hidpi version
+          .build/release/hidpi list
+          .build/release/hidpi profiles | head -3
+          test -d dist/HiDPI.app
+          codesign --verify --verbose=2 dist/HiDPI.app
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: HiDPI-dmg
+          path: dist/HiDPI-*.dmg
+          if-no-files-found: error
+
+      - name: 打 tag 时自动发布 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/HiDPI-*.dmg
+          generate_release_notes: true
