@@ -214,7 +214,11 @@ private func brightnessKeyCallback(proxy: CGEventTapProxy,
     return Unmanaged.passUnretained(event)
   }
 
-  delegate.adjustBrightness(delta: keyCode == 3 ? 0.05 : -0.05)
+  // 注意：不同键盘发出的键码方向可能相反。实测本机 F1(2)=亮、F2(3)=暗，故默认反转
+  let invert = UserDefaults.standard.object(forKey: "brightnessKeysInvertStandard") as? Bool ?? true
+  let step: Float = 0.05
+  let up = keyCode == 3
+  delegate.adjustBrightness(delta: (up != invert) ? step : -step)
   return nil // 吃掉事件，避免系统同时调内建屏
 }
 
