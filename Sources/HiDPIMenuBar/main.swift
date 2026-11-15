@@ -87,6 +87,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     menu.addItem(.separator())
 
+    let startup = NSMenuItem(title: "开机自启动", action: #selector(toggleLaunchAtLogin(_:)), keyEquivalent: "")
+    startup.target = self
+    startup.state = launchAtLoginEnabled() ? .on : .off
+    menu.addItem(startup)
+
     let settings = NSMenuItem(title: "打开显示器设置…", action: #selector(openSettings), keyEquivalent: "")
     settings.target = self
     menu.addItem(settings)
@@ -148,25 +153,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       item.state = (entry.width == current?.width && entry.height == current?.height) ? .on : .off
       resolutionMenu.addItem(item)
     }
-
-    if !common.isEmpty {
-      resolutionMenu.addItem(.separator())
-    }
-    let allItem = NSMenuItem(title: "全部分辨率…", action: nil, keyEquivalent: "")
-    let allMenu = NSMenu()
-    for entry in entries {
-      var title = "\(entry.width)×\(entry.height)"
-      if entry.hiDPI { title += "  HiDPI" }
-      title += "  · \(Int(entry.refresh))Hz"
-      let item = NSMenuItem(title: title, action: #selector(selectMode(_:)), keyEquivalent: "")
-      item.target = self
-      item.tag = entry.index
-      item.representedObject = NSNumber(value: displayID)
-      item.state = "\(entry.width)x\(entry.height)x\(entry.hiDPI ? 1 : 0)" == currentKey ? .on : .off
-      allMenu.addItem(item)
-    }
-    allItem.submenu = allMenu
-    resolutionMenu.addItem(allItem)
 
     resolutionItem.submenu = resolutionMenu
     menu.addItem(resolutionItem)
@@ -293,6 +279,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     rebuildMenu()
   }
 
+  // MARK: - 开机自启动（LaunchAgent）
+
+  private var launchAgentPath: String {
+    ("~/Library/LaunchAgents/pro.local.hidpi.plist" as NSString).expandingTildeInPath
+  }
+
+  func launchAtLoginEnabled() -> Bool {
+    FileManager.default.fileExists(atPath: launchAgentPath)
+  }
+
+  @objc private func toggleLaunchAtLogin(_ sender: NSMenuItem) {
+    setLaunchAtLogin(!launchAtLoginEnabled())
+    rebuildMenu()
+  }
+
+  func setLaunchAtLogin(_ enabled: Bool) {
+    let label = "pro.local.hidpi"
+    let uid = getuid()
+
+    if enabled {
+      guard let executable = Bundle.main.executablePath else { return }
+      let plist = """
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      <plist version="1.0">
+      <dict>
+        <key>Label</key><string>\(label)</string>
+        <key>ProgramArguments</key><array><string>\(executable)</string></array>
+        <key>RunAtLoad</key><true/>
+        <key>LimitLoadToSessionType</key><string>Aqua</string>
+        <key>ProcessType</key><string>Interactive</string>
+      </dict>
+      </plist>
+      """
+      let directory = (launchAgentPath as NSString).deletingLastPathComponent
+      try? FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+      try? plist.write(toFile: launchAgentPath, atomically: true, encoding: .utf8)
+      _ = capture("/bin/launchctl", ["bootstrap", "gui/\(uid)", launchAgentPath])
+    } else {
+      try? FileManager.default.removeItem(atPath: launchAgentPath)
+      // 当前 App 若不是由该 job 启动，才卸载；否则会把自己杀掉
+      if jobPID(label: label) != getpid() {
+        _ = capture("/bin/launchctl", ["bootout", "gui/\(uid)/\(label)"])
+      }
+    }
+  }
+
+  private func jobPID(label: String) -> pid_t? {
+    guard let output = capture("/bin/launchctl", ["print", "gui/\(getuid())/\(label)"]) else { return nil }
+    for line in output.split(separator: "\n") where line.contains("pid = ") {
+      let value = line.split(separator: "=").last?.trimmingCharacters(in: .whitespaces) ?? ""
+      if let pid = Int(value) { return pid_t(pid) }
+    }
+    return nil
+  }
+
+  @discardableResult
+  private func capture(_ path: String, _ args: [String]) -> String? {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: path)
+    process.arguments = args
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = pipe
+    do { try process.run() } catch { return nil }
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    return String(data: data, encoding: .utf8)
+  }
+
   @objc private func openSettings() {
     if let url = URL(string: "x-apple.systempreferences:com.apple.Displays-Settings.extension") {
       NSWorkspace.shared.open(url)
@@ -310,6 +366,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 // MARK: - 入口
 
+let delegate = AppDelegate()
+
+// 测试/脚本钩子：HIDPI_STARTUP=on|off 直接开关自启动后退出
+if let mode = ProcessInfo.processInfo.environment["HIDPI_STARTUP"] {
+  delegate.setLaunchAtLogin(mode == "on")
+  print("launchAtLogin=\(delegate.launchAtLoginEnabled())")
+  exit(0)
+}
+
 // 单实例保护
 if let bundleID = Bundle.main.bundleIdentifier {
   let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
@@ -321,7 +386,6 @@ if let bundleID = Bundle.main.bundleIdentifier {
 }
 
 let app = NSApplication.shared
-let delegate = AppDelegate()
 app.delegate = delegate
 app.setActivationPolicy(.accessory)
 app.run()
