@@ -11,7 +11,6 @@ import HDShim
 import HiDPICore
 
 private let kSleepPreventionKey = "preventDisplaySleep"
-private let launchAgentLabel = "pro.local.hidpi"
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var statusItem: NSStatusItem!
@@ -81,7 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       displays: displays,
       clamshellText: DisplayCatalog.clamshellText(),
       sleepPreventionOn: hd_sleep_prevented() == 1,
-      launchAtLoginOn: launchAgentExists()
+      launchAtLoginOn: LaunchAtLogin.isEnabled()
     )
 
     let items = MenuBuilder.build(
@@ -191,77 +190,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
   }
 
-  // MARK: - 开机自启动（LaunchAgent）
-
-  private var launchAgentURL: URL {
-    FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent("Library/LaunchAgents/\(launchAgentLabel).plist")
-  }
-
-  private func launchAgentExists() -> Bool {
-    FileManager.default.fileExists(atPath: launchAgentURL.path)
-  }
-
   private func toggleLaunchAtLogin() {
-    if launchAgentExists() {
-      disableLaunchAtLogin()
-    } else {
-      enableLaunchAtLogin()
-    }
-  }
-
-  private func enableLaunchAtLogin() {
-    guard let executable = Bundle.main.executablePath else { return }
-    let plist = """
-    <?xml version="1.0" encoding="UTF-8"?>
-    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-    <plist version="1.0">
-    <dict>
-      <key>Label</key><string>\(launchAgentLabel)</string>
-      <key>ProgramArguments</key><array><string>\(executable)</string></array>
-      <key>RunAtLoad</key><true/>
-      <key>LimitLoadToSessionType</key><string>Aqua</string>
-      <key>ProcessType</key><string>Interactive</string>
-    </dict>
-    </plist>
-    """
-    try? FileManager.default.createDirectory(
-      at: launchAgentURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-    try? plist.write(to: launchAgentURL, atomically: true, encoding: .utf8)
-    launchctl(["bootstrap", "gui/\(getuid())", launchAgentURL.path])
-  }
-
-  private func disableLaunchAtLogin() {
-    try? FileManager.default.removeItem(at: launchAgentURL)
-    let output = launchctlOutput(["print", "gui/\(getuid())/\(launchAgentLabel)"]) ?? ""
-    let pidLine = output.split(separator: "\n").first { $0.contains("pid = ") }
-    let jobPID = pidLine.flatMap { Int($0.split(separator: "=").last?.trimmingCharacters(in: .whitespaces) ?? "") }
-    if jobPID != Int(getpid()) {
-      launchctl(["bootout", "gui/\(getuid())/\(launchAgentLabel)"])
-    }
-  }
-
-  @discardableResult
-  private func launchctl(_ arguments: [String]) -> Int32 {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-    process.arguments = arguments
-    do { try process.run() } catch { return -1 }
-    process.waitUntilExit()
-    return process.terminationStatus
-  }
-
-  private func launchctlOutput(_ arguments: [String]) -> String? {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-    process.arguments = arguments
-    let pipe = Pipe()
-    process.standardOutput = pipe
-    process.standardError = pipe
-    do { try process.run() } catch { return nil }
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    process.waitUntilExit()
-    return String(data: data, encoding: .utf8)
+    LaunchAtLogin.setEnabled(!LaunchAtLogin.isEnabled())
   }
 
   private func notify(title: String, text: String) {

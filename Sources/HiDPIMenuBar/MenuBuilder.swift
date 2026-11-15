@@ -179,21 +179,22 @@ enum MenuBuilder {
 
     let native = DisplayCatalog.nativePixelSize(displayID: display.id)
     let current = DisplayCatalog.current(displayID: display.id)
+    let common = DisplayCatalog.commonModes(displayID: display.id)
 
     // 分辨率
     var resolutionItems: [NSMenuItem] = []
     var seen = Set<String>()
-    for entry in DisplayCatalog.commonModes(displayID: display.id) {
+    for entry in common {
       if seen.contains(entry.sizeKey) { continue }
       seen.insert(entry.sizeKey)
 
       let wantHiDPI = current?.hiDPI ?? true
-      let sameRate = DisplayCatalog.commonModes(displayID: display.id).first {
+      let sameRate = common.first {
         $0.width == entry.width && $0.height == entry.height
           && $0.hiDPI == wantHiDPI && Int($0.refresh.rounded()) == Int((current?.refresh ?? 0).rounded())
       }
       let variant = sameRate
-        ?? DisplayCatalog.commonModes(displayID: display.id).first {
+        ?? common.first {
           $0.width == entry.width && $0.height == entry.height && $0.hiDPI == wantHiDPI
         }
         ?? entry
@@ -237,9 +238,7 @@ enum MenuBuilder {
 
     // 颜色描述文件
     var profileItems: [NSMenuItem] = []
-    var currentPointer = hd_current_color_profile(display.id)
-    let currentProfile = currentPointer.map { String(cString: $0) }
-    if let currentPointer { free(currentPointer) }
+    let currentProfile = ColorProfileCatalog.current(displayID: display.id)
 
     profileItems.append(router.makeItem(
       title: "系统默认",
@@ -248,19 +247,11 @@ enum MenuBuilder {
 
     profileItems.append(.separator())
 
-    var paths: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
-    var count: Int32 = 0
-    if hd_list_color_profiles(&paths, &count) == 0, let paths {
-      defer { hd_free_profiles(paths, count) }
-      for index in 0 ..< Int(count) {
-        guard let cString = paths[index] else { continue }
-        let path = String(cString: cString)
-        let name = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
-        profileItems.append(router.makeItem(
-          title: name,
-          state: path == currentProfile ? .on : .off
-        ) { onApplyProfile(display.id, path) })
-      }
+    for profile in ColorProfileCatalog.all() {
+      profileItems.append(router.makeItem(
+        title: profile.displayName,
+        state: profile.path == currentProfile ? .on : .off
+      ) { onApplyProfile(display.id, profile.path) })
     }
 
     let hidpiItem = router.makeItem(

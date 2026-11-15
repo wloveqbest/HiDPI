@@ -173,18 +173,14 @@ func cmdState() {
 }
 
 func cmdProfiles() {
-  var paths: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
-  var count: Int32 = 0
-  guard hd_list_color_profiles(&paths, &count) == 0, let paths else {
+  let profiles = ColorProfileCatalog.all()
+  guard !profiles.isEmpty else {
     err("无法枚举颜色描述文件")
     return
   }
-  defer { hd_free_profiles(paths, count) }
-  print("可用颜色描述文件（\(count) 个）\n")
-  for index in 0 ..< Int(count) {
-    if let cString = paths[index] {
-      print("  " + String(cString: cString))
-    }
+  print("可用颜色描述文件（\(profiles.count) 个）\n")
+  for profile in profiles {
+    print("  " + profile.path)
   }
 }
 
@@ -194,9 +190,8 @@ func cmdProfile(_ args: [String]) {
     return
   }
   if args.count == 1 {
-    if let current = hd_current_color_profile(displayID) {
-      defer { free(current) }
-      print("显示器 \(displayID) 当前描述文件: \(String(cString: current))")
+    if let current = ColorProfileCatalog.current(displayID: displayID) {
+      print("显示器 \(displayID) 当前描述文件: \(current)")
     } else {
       print("显示器 \(displayID) 使用系统默认描述文件")
     }
@@ -209,7 +204,7 @@ func cmdProfile(_ args: [String]) {
     err("找不到文件: \(path)")
     return
   }
-  let result = path.map { hd_apply_color_profile(displayID, $0) } ?? hd_apply_color_profile(displayID, nil)
+  let result = ColorProfileCatalog.apply(displayID: displayID, path: path)
   if result != 0 {
     err("应用颜色描述文件失败，错误码 \(result)")
     return
