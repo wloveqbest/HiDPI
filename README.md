@@ -181,6 +181,6 @@ Sources/
 
 ## 许可与署名
 
-MIT —— 见 [LICENSE](LICENSE)。
+MIT —— 见 [LICENSE](LICENSE)；第三方署名见 [NOTICE.md](NOTICE.md)。
 
 私有类型的 `@interface` 声明参考自 **BetterDummy OpenSource Edition**（MIT，Copyright (c) 2021 Istvan T.），即 [waydabber/BetterDisplay 的 `opensource` 分支](https://github.com/waydabber/BetterDisplay/tree/opensource)。上游当前 5.x 已闭源，与本项目无代码关系。
