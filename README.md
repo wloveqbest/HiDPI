@@ -12,6 +12,8 @@
 | 注入自定义分辨率（如 2400×1350 HiDPI） | 是 | ✅ 实测生效（可选，见下文） |
 | 让注入的分辨率生效（`hidpi cycle`，约黑屏 2 秒） | 否 | ✅ 实测 |
 | 开机自启动 | 否 | ✅ 实测 |
+| 屏幕亮度（gamma 软件调光） | 否 | ✅ 实测 |
+| 颜色描述文件（ICC 切换） | 否 | ✅ 实测 |
 | 虚拟屏（无头/串流） | 否 | 仅 CLI 保留，App 已移除 |
 
 上限：HiDPI 背衬约 5120 像素宽。4K 面板上 `2880×1620`（5760×3240）、`3008×1692`（6016×3384）会被系统丢弃，`2560×1440` 及以下是安全的。
@@ -37,7 +39,9 @@ H27T22C — 1920×1080 HiDPI
   │                  ──────────
   │                  全部分辨率… ▸   （完整模式表，含 LoDPI/HiDPI 与刷新率）
   ├─ 刷新率 ▸        24 / 30 / 60 / 72 / [x] 75 Hz   （当前分辨率下全部刷新率）
-  └─ ☑ 启用 HiDPI                      （同尺寸在 1x / 2x 间切换）
+  ├─ ☑ 启用 HiDPI                      （同尺寸在 1x / 2x 间切换）
+  ├─ 亮度 ▸            [x] 100% / 90% / 80% / … / 20%
+  └─ 颜色描述文件 ▸    [x] 系统默认 / Generic RGB Profile.icc / …
 ☑ 开机自启动
 打开显示器设置…
 退出 HiDPI
@@ -65,6 +69,22 @@ H27T22C — 1920×1080 HiDPI
 勾选时写入并 `launchctl bootstrap`，取消勾选则删除文件并 `launchctl bootout`。因为是 LSUIElement App，登录后只出现菜单栏图标，不弹窗口。
 
 > 只对「登录」生效，不是开机前。换 App 位置（不再是 /Applications）后需要重新勾选一次，让路径更新。
+
+## 亮度与颜色
+
+**亮度**走 gamma 表（`CGSetDisplayTransferByTable`），属于软件调光：
+
+- 全显示器通用，不需要 DDC，也不需要 root
+- 会降低输出信号的灰阶，色彩精度不如硬件调光
+- gamma 是**进程级**的：App 退出后自动恢复原始亮度（实测：App 存活时其他进程读到 0.5，退出后回到 1.0）
+- 本机 DDC/CI 写入被系统拒绝（`IOAVServiceWriteI2C` 返回 `0xe0114102`），所以没有做硬件亮度
+
+**颜色描述文件**走 ColorSync：
+
+- 列出 `/System/Library/ColorSync/Profiles`、`/Library/ColorSync/Profiles`、`~/Library/ColorSync/Profiles` 下的 `.icc/.icm`
+- 应用时调用 `ColorSyncDeviceSetCustomProfiles`，系统会在 `/Library/ColorSync/Profiles/Displays/` 生成 `<显示器>-<UUID>.icc`
+- 「系统默认」= 把自定义项指回工厂 profile（`FactoryProfiles[DeviceDefaultProfileID]`）
+- 不需要 root
 
 ## 机制：四层，每层都已验证
 
@@ -144,6 +164,9 @@ swift build -c release
 | `hidpi activate <id>` | 同 `cycle <id> 2` |
 | `hidpi detect` | `SLSDetectDisplays`（实测不足以激活 override，仅诊断用） |
 | `hidpi info <id>` | 厂商号/型号号与 override 路径（十进制 + 十六进制） |
+| `hidpi brightness <id> [0-100]` | 查看/设置亮度（gamma，进程退出即失效） |
+| `hidpi profiles` | 列出可用的颜色描述文件 |
+| `hidpi profile <id> [路径\|default]` | 查看/应用颜色描述文件 |
 | `hidpi create` | 虚拟屏（`--size/--refresh/--name/--lo/--seconds`） |
 
 ### 实测记录

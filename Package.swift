@@ -12,6 +12,7 @@ let package = Package(
       linkerSettings: [
         .linkedFramework("Foundation"),
         .linkedFramework("CoreGraphics"),
+        .linkedFramework("ColorSync"),
       ]
     ),
     .executableTarget(

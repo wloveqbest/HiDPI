@@ -27,6 +27,18 @@ void hd_release_virtual_displays(void);
 /// 返回当前连接的虚拟显示器数量。
 int hd_virtual_display_count(void);
 
+/// 亮度：软件调光（gamma 表），0.05–1.0，1.0 为原始
+int hd_set_brightness(uint32_t displayID, float level);
+float hd_get_brightness(uint32_t displayID);
+
+/// 颜色描述文件：列出系统里可用的 .icc/.icm（返回 malloc 的 C 字符串数组，需 hd_free_profiles）
+int hd_list_color_profiles(char ***paths, int *count);
+void hd_free_profiles(char **paths, int count);
+/// 应用 ICC；path 为 NULL 表示恢复系统默认
+int hd_apply_color_profile(uint32_t displayID, const char *path);
+/// 当前生效的自定义 profile 路径（调用方负责 free），无则 NULL
+char *hd_current_color_profile(uint32_t displayID);
+
 int hd_display_mode_count(uint32_t displayID);
 int hd_display_mode_at(uint32_t displayID, int index, hd_mode_t *out);
 int hd_display_current_mode(uint32_t displayID);

@@ -37,6 +37,9 @@ hidpi — 开源的 macOS HiDPI 工具
   hidpi cycle <displayID> [秒数]          软件断开/重连显示器（会黑屏，激活 override 用）
   hidpi activate <displayID>             激活 override（等同 cycle <id> 2）
   hidpi info <displayID>                 显示厂商号/型号号（生成 override 用）
+  hidpi brightness <id> [0-100]          查看/设置亮度（gamma 软件调光）
+  hidpi profiles                         列出可用的颜色描述文件
+  hidpi profile <id> [路径|default]      查看/应用颜色描述文件
   hidpi version                          版本信息
   hidpi help                             显示本帮助
 
@@ -181,6 +184,76 @@ func cmdInfo(_ args: [String]) {
   print("  厂商号   0x\(String(vendor, radix: 16)) (\(vendor))")
   print("  型号号   0x\(String(product, radix: 16)) (\(product))")
   print("  Override 路径  /Library/Displays/Contents/Resources/Overrides/DisplayVendorID-\(vendor)/DisplayProductID-\(product)")
+}
+
+func cmdBrightness(_ args: [String]) {
+  guard args.count >= 1, let displayID = parseUInt32(args[0]) else {
+    err("用法: hidpi brightness <displayID> [0-100]")
+    return
+  }
+  if args.count == 1 {
+    let value = hd_get_brightness(displayID)
+    if value < 0 {
+      err("读取亮度失败")
+    } else {
+      print("显示器 \(displayID) 当前亮度: \(Int((value * 100).rounded()))%")
+    }
+    return
+  }
+  guard let percent = Double(args[1]), (0 ... 100).contains(percent) else {
+    err("亮度需要 0-100 之间的数字")
+    return
+  }
+  if hd_set_brightness(displayID, Float(percent / 100.0)) != 0 {
+    err("设置亮度失败")
+    return
+  }
+  print("已将显示器 \(displayID) 亮度设为 \(Int(percent))%")
+}
+
+func cmdProfiles() {
+  var paths: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+  var count: Int32 = 0
+  guard hd_list_color_profiles(&paths, &count) == 0, let paths else {
+    err("无法枚举颜色描述文件")
+    return
+  }
+  defer { hd_free_profiles(paths, count) }
+  print("可用颜色描述文件（\(count) 个）\n")
+  for index in 0 ..< Int(count) {
+    if let cString = paths[index] {
+      print("  " + String(cString: cString))
+    }
+  }
+}
+
+func cmdProfile(_ args: [String]) {
+  guard args.count >= 1, let displayID = parseUInt32(args[0]) else {
+    err("用法: hidpi profile <displayID> [路径|default]")
+    return
+  }
+  if args.count == 1 {
+    if let current = hd_current_color_profile(displayID) {
+      defer { free(current) }
+      print("显示器 \(displayID) 当前描述文件: \(String(cString: current))")
+    } else {
+      print("显示器 \(displayID) 使用系统默认描述文件")
+    }
+    return
+  }
+
+  let target = args[1]
+  let path: String? = target.lowercased() == "default" ? nil : target
+  if let path, !FileManager.default.fileExists(atPath: path) {
+    err("找不到文件: \(path)")
+    return
+  }
+  let result = path.map { hd_apply_color_profile(displayID, $0) } ?? hd_apply_color_profile(displayID, nil)
+  if result != 0 {
+    err("应用颜色描述文件失败，错误码 \(result)")
+    return
+  }
+  print(path == nil ? "已恢复系统默认颜色描述文件" : "已应用 \(path!)")
 }
 
 func cmdDetect() {
@@ -394,6 +467,12 @@ case "create":
   cmdCreate(Array(arguments.dropFirst()))
 case "info":
   cmdInfo(Array(arguments.dropFirst()))
+case "brightness":
+  cmdBrightness(Array(arguments.dropFirst()))
+case "profiles":
+  cmdProfiles()
+case "profile":
+  cmdProfile(Array(arguments.dropFirst()))
 case "detect":
   cmdDetect()
 case "cycle":

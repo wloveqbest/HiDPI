@@ -43,6 +43,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     statusItem.menu = menu
     rebuildMenu()
 
+    // 诊断钩子：HIDPI_BRIGHTNESS=50 设置后保持 6 秒，便于另一个进程读取 gamma
+    if let value = ProcessInfo.processInfo.environment["HIDPI_BRIGHTNESS"], let level = Float(value) {
+      _ = hd_set_brightness(CGMainDisplayID(), level / 100.0)
+      print("brightness=\(Int(level))%")
+      Thread.sleep(forTimeInterval: 6)
+      exit(0)
+    }
+
     if ProcessInfo.processInfo.environment["HIDPI_DUMP_MENU"] == "1" {
       dump(menu: menu, depth: 0)
       exit(0)
@@ -197,6 +205,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     hidpiItem.state = current?.hiDPI == true ? .on : .off
     menu.addItem(hidpiItem)
 
+    menu.addItem(.separator())
+
+    // 亮度（gamma 软件调光，App 退出即恢复）
+    let brightnessItem = NSMenuItem(title: "亮度", action: nil, keyEquivalent: "")
+    let brightnessMenu = NSMenu()
+    let currentLevel = Int((hd_get_brightness(displayID) * 100).rounded())
+    for level in [100, 90, 80, 70, 60, 50, 40, 30, 20] {
+      let item = NSMenuItem(title: "\(level)%", action: #selector(setBrightness(_:)), keyEquivalent: "")
+      item.target = self
+      item.tag = level
+      item.representedObject = NSNumber(value: displayID)
+      item.state = level == currentLevel ? .on : .off
+      brightnessMenu.addItem(item)
+    }
+    brightnessItem.submenu = brightnessMenu
+    menu.addItem(brightnessItem)
+
+    // 颜色描述文件
+    let profileItem = NSMenuItem(title: "颜色描述文件", action: nil, keyEquivalent: "")
+    profileItem.submenu = colorProfileMenu(for: displayID)
+    menu.addItem(profileItem)
+
     return menu
   }
 
@@ -263,6 +293,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   }
 
   // MARK: - 动作
+
+  @objc private func setBrightness(_ sender: NSMenuItem) {
+    guard let number = sender.representedObject as? NSNumber else { return }
+    if hd_set_brightness(number.uint32Value, Float(sender.tag) / 100.0) != 0 {
+      notify(title: "亮度调整失败", text: "该显示器不接受 gamma 调整。")
+      return
+    }
+    rebuildMenu()
+  }
+
+  @objc private func applyProfile(_ sender: NSMenuItem) {
+    guard let payload = sender.representedObject as? String else { return }
+    let parts = payload.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+    guard let displayID = UInt32(parts[0]) else { return }
+    let path = parts.count > 1 ? String(parts[1]) : ""
+    let result = path.isEmpty ? hd_apply_color_profile(displayID, nil) : hd_apply_color_profile(displayID, path)
+    if result != 0 {
+      notify(title: "应用失败", text: "错误码 \(result)")
+      return
+    }
+    rebuildMenu()
+  }
+
+  private func colorProfileMenu(for displayID: CGDirectDisplayID) -> NSMenu {
+    let menu = NSMenu()
+
+    var currentPointer = hd_current_color_profile(displayID)
+    let currentProfile = currentPointer.map { String(cString: $0) }
+    if let currentPointer { free(currentPointer) }
+
+    let defaultItem = NSMenuItem(title: "系统默认", action: #selector(applyProfile(_:)), keyEquivalent: "")
+    defaultItem.target = self
+    defaultItem.representedObject = "\(displayID)|"
+    defaultItem.state = currentProfile == nil ? .on : .off
+    menu.addItem(defaultItem)
+    menu.addItem(.separator())
+
+    var paths: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+    var count: Int32 = 0
+    if hd_list_color_profiles(&paths, &count) == 0, let paths {
+      defer { hd_free_profiles(paths, count) }
+      for index in 0 ..< Int(count) {
+        guard let cString = paths[index] else { continue }
+        let path = String(cString: cString)
+        let item = NSMenuItem(title: (path as NSString).lastPathComponent,
+                              action: #selector(applyProfile(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = "\(displayID)|\(path)"
+        item.state = path == currentProfile ? .on : .off
+        menu.addItem(item)
+      }
+    }
+    return menu
+  }
 
   @objc private func selectMode(_ sender: NSMenuItem) {
     guard let number = sender.representedObject as? NSNumber else { return }
