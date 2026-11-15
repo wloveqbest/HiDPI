@@ -28,12 +28,6 @@ hidpi — 开源的 macOS HiDPI 工具
   hidpi list                             列出显示器及逻辑/像素尺寸
   hidpi modes <displayID>                列出某显示器的全部模式
   hidpi set <displayID> <index>          切换到指定模式索引
-  hidpi create [选项]                    创建 HiDPI 虚拟显示器并保持连接
-      --size <WxH>       逻辑分辨率（默认 1920x1080）
-      --refresh <HZ>     刷新率（默认 60）
-      --name <NAME>      显示器名称（默认 HiDPI Display）
-      --lo               创建 1x（非 HiDPI）显示
-      --seconds <N>      运行 N 秒后自动断开（默认运行到 Ctrl-C）
   hidpi detect                           让系统重新枚举显示器
   hidpi cycle <displayID> [秒数]          软件断开/重连显示器（会黑屏，激活 override 用）
   hidpi activate <displayID>             激活 override（等同 cycle <id> 2）
@@ -44,7 +38,6 @@ hidpi — 开源的 macOS HiDPI 工具
   hidpi version                          版本信息
   hidpi help                             显示本帮助
 
-说明: 虚拟显示器与进程同寿命，进程退出即断开。
 """
 
 // MARK: - 显示器枚举
@@ -103,10 +96,6 @@ func cmdList() {
         + pad("\(info.pixels.0)x\(info.pixels.1)", 14)
         + flags
     )
-  }
-  let virtualCount = hd_virtual_display_count()
-  if virtualCount > 0 {
-    print("\n本进程创建的虚拟显示器: \(virtualCount) 块")
   }
 }
 
@@ -238,21 +227,6 @@ func cmdDetect() {
   print("已请求系统重新枚举显示器")
 }
 
-/// 执行外部命令，返回退出码
-@discardableResult
-func run(_ path: String, _ arguments: [String]) -> Int32 {
-  let process = Process()
-  process.executableURL = URL(fileURLWithPath: path)
-  process.arguments = arguments
-  do {
-    try process.run()
-  } catch {
-    return -1
-  }
-  process.waitUntilExit()
-  return process.terminationStatus
-}
-
 func cmdActivate(_ args: [String]) {
   guard let displayID = args.first.flatMap(parseUInt32) else {
     err("用法: hidpi activate <displayID>   （等价于 hidpi cycle <id> 2）")
@@ -296,122 +270,6 @@ func cmdCycle(_ args: [String]) {
   }
 }
 
-// MARK: - 创建虚拟显示器
-
-func cmdCreate(_ args: [String]) {
-  var logicalWidth = 1920
-  var logicalHeight = 1080
-  var refresh: Double = 60
-  var name = "HiDPI Display"
-  var hiDPI = true
-  var seconds: Double?
-
-  var i = 0
-  while i < args.count {
-    switch args[i] {
-    case "--size":
-      i += 1
-      guard i < args.count else { err("--size 需要一个参数"); return }
-      let parts = args[i].lowercased().split(separator: "x")
-      guard parts.count == 2, let w = Int(parts[0]), let h = Int(parts[1]), w >= 320, h >= 240 else {
-        err("--size 格式应为 WxH，例如 1920x1080")
-        return
-      }
-      logicalWidth = w
-      logicalHeight = h
-    case "--refresh":
-      i += 1
-      guard i < args.count, let value = Double(args[i]), value > 0 else {
-        err("--refresh 需要一个正数")
-        return
-      }
-      refresh = value
-    case "--name":
-      i += 1
-      guard i < args.count else { err("--name 需要一个参数"); return }
-      name = args[i]
-    case "--lo":
-      hiDPI = false
-    case "--seconds":
-      i += 1
-      guard i < args.count, let value = Double(args[i]), value > 0 else {
-        err("--seconds 需要一个正数")
-        return
-      }
-      seconds = value
-    default:
-      err("未知选项: \(args[i])")
-      print(usage)
-      return
-    }
-    i += 1
-  }
-
-  let displayID = hd_create_virtual_display(
-    UInt32(logicalWidth),
-    UInt32(logicalHeight),
-    refresh,
-    name,
-    hiDPI ? 1 : 0
-  )
-  guard displayID != 0 else {
-    err("创建虚拟显示器失败")
-    err("常见原因: 进程跑在 Rosetta 下、系统禁用了 CGVirtualDisplay、或分辨率过大。")
-    return
-  }
-
-  let scale = hiDPI ? 2 : 1
-  print("已创建虚拟显示器")
-  print("  ID        \(displayID)")
-  print("  名称      \(name)")
-  print("  逻辑      \(logicalWidth)x\(logicalHeight) pt")
-  print("  背衬      \(logicalWidth * scale)x\(logicalHeight * scale) px（\(hiDPI ? "HiDPI 2x" : "LoDPI 1x")）")
-  print("  刷新率    \(Int(refresh)) Hz")
-  print("\n下一步:")
-  print("  hidpi modes \(displayID)                 查看可用模式")
-  print("  hidpi set \(displayID) <索引>            切换模式")
-  print("  系统设置 > 显示器 > 为该虚拟屏选择 HiDPI 档位")
-
-  let createdID = UInt32(displayID)
-  let hidpiModes = DisplayCatalog.rawModes(displayID: createdID)
-    .filter { $0.hiDPI }
-    .map { "\($0.width)x\($0.height)" }
-  if hidpiModes.isEmpty {
-    print("\n注意: 该虚拟屏没有暴露 HiDPI 模式")
-  } else {
-    let unique = Array(Set(hidpiModes)).sorted()
-    print("\n已确认 HiDPI 模式: " + unique.joined(separator: ", "))
-  }
-
-  if let seconds {
-    print("\n\(Int(seconds)) 秒后自动断开…")
-    DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
-      hd_release_virtual_displays()
-      print("已断开虚拟显示器")
-      exit(0)
-    }
-  } else {
-    print("\n按 Ctrl-C 断开并退出。")
-  }
-
-  // 虚拟显示器与进程同寿命，保持主线程存活
-  signal(SIGINT, SIG_IGN)
-  signal(SIGTERM, SIG_IGN)
-  let sources = [SIGINT, SIGTERM].map { sig -> DispatchSourceSignal in
-    let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
-    source.setEventHandler {
-      hd_release_virtual_displays()
-      print("\n已断开虚拟显示器")
-      exit(0)
-    }
-    source.resume()
-    return source
-  }
-  withExtendedLifetime(sources) {
-    RunLoop.main.run()
-  }
-}
-
 // MARK: - 入口
 
 // 让输出在重定向到文件/管道时也能实时可见
@@ -431,8 +289,6 @@ case "modes":
   cmdModes(Array(arguments.dropFirst()))
 case "set":
   cmdSet(Array(arguments.dropFirst()))
-case "create":
-  cmdCreate(Array(arguments.dropFirst()))
 case "info":
   cmdInfo(Array(arguments.dropFirst()))
 case "state":

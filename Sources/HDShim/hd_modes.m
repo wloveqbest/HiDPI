@@ -56,16 +56,6 @@ int hd_display_mode_at(uint32_t displayID, int index, hd_mode_t *out) {
   return 0;
 }
 
-int hd_display_current_mode(uint32_t displayID) {
-  CGSGetCurrentDisplayModeFn fn = (CGSGetCurrentDisplayModeFn)hd_resolve_cgs("CGSGetCurrentDisplayMode");
-  if (fn == NULL) {
-    return -1;
-  }
-  int current = -1;
-  fn(displayID, &current);
-  return current;
-}
-
 typedef void (*CGSConfigureDisplayEnabledFn)(CGDisplayConfigRef, uint32_t, bool);
 
 int hd_cycle_display(uint32_t displayID, double seconds) {
@@ -98,8 +88,6 @@ int hd_cycle_display(uint32_t displayID, double seconds) {
   CGError enableError = CGCompleteDisplayConfiguration(restore, kCGConfigurePermanently);
   return enableError == kCGErrorSuccess ? 0 : -4;
 }
-
-typedef void (*SLSDetectDisplaysFn)(void);
 
 int hd_display_set_mode(uint32_t displayID, int index) {
   CGSConfigureDisplayModeFn configure = (CGSConfigureDisplayModeFn)hd_resolve_cgs("CGSConfigureDisplayMode");

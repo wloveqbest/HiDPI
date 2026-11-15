@@ -13,19 +13,6 @@ typedef struct {
   int hiDPI;             ///< 1 = 背衬为 2x 像素
 } hd_mode_t;
 
-/// 创建一块虚拟显示器，返回其 CGDirectDisplayID；失败返回 0。
-/// 虚拟显示器与调用进程同生命周期：进程退出即断开。
-int hd_create_virtual_display(uint32_t logicalWidth,
-                              uint32_t logicalHeight,
-                              double refreshRate,
-                              const char *name,
-                              int hiDPI);
-
-/// 释放本进程创建的全部虚拟显示器。
-void hd_release_virtual_displays(void);
-
-/// 返回当前连接的虚拟显示器数量。
-int hd_virtual_display_count(void);
 
 /// 颜色描述文件：列出系统里可用的 .icc/.icm（返回 malloc 的 C 字符串数组，需 hd_free_profiles）
 int hd_list_color_profiles(char ***paths, int *count);
@@ -45,7 +32,6 @@ int hd_sleep_prevented(void);
 
 int hd_display_mode_count(uint32_t displayID);
 int hd_display_mode_at(uint32_t displayID, int index, hd_mode_t *out);
-int hd_display_current_mode(uint32_t displayID);
 
 /// 软件断开显示器 seconds 秒后再重连，迫使系统重新枚举（等价于拔插线缆）。
 /// 会短暂黑屏，调用方务必保证重连一定执行。

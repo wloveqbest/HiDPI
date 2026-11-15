@@ -19,83 +19,33 @@
 
 ## 功能清单
 
-### 菜单栏 App
+### 菜单设计
 
-| # | 功能 | 说明 |
-|---|---|---|
-| 1 | 分辨率切换 | 常见尺寸白名单、按尺寸去重、沿用当前刷新率 |
-| 2 | 缺 HiDPI 标注 | `（无 HiDPI）` / `（原生，1:1 像素）` |
-| 3 | 刷新率切换 | 当前分辨率下的全部档位（含 24/30Hz 影院档） |
-| 4 | HiDPI 开关 | 同尺寸在 1x / 2x 间切换 |
-| 5 | 设置窗口 | 显示器选择 + 颜色描述文件 |
-| 6 | 颜色描述文件 | ColorSync ICC 切换，含「系统默认」 |
-| 7 | 颜色持久化 | 按显示器 ID 保存，唤醒/换屏后自动重放 |
-| 8 | 合盖状态 | 菜单标题显示「开盖 / 已合盖」 |
-| 9 | 防止显示器睡眠 | `IOPMAssertion`，持久化 |
-| 10 | 开机自启动 | LaunchAgent，菜单勾选 |
-| 11 | 单实例保护 | 重复启动只激活已有实例 |
-
-### 命令行 `hidpi`
-
-| 命令 | 功能 |
-|---|---|
-| `list` | 显示器列表（逻辑/像素尺寸） |
-| `modes <id>` | 完整模式表，标注密度与当前项 |
-| `set <id> <index>` | 立即切换 |
-| `info <id>` | vendor/product + override 路径（十进制与十六进制） |
-| `detect` | `SLSDetectDisplays`（诊断用） |
-| `cycle <id> [秒]` | 软件断开/重连，激活 override |
-| `activate <id>` | 同 `cycle <id> 2` |
-| `state` | 合盖状态 |
-| `profiles` / `profile <id> [路径\|default]` | 颜色描述文件 |
-| `create` | 虚拟屏（无头/串流，可选） |
-| `version` / `help` | 版本与帮助 |
-
-### 脚本
-
-| 脚本 | 功能 |
-|---|---|
-| `build-app.sh` | 编译 → .app 组装 → 图标 → ad-hoc 签名 → DMG |
-| `add-custom-resolution.sh` | override 注入（hex+decimal、合并、自动激活、模式表前后对比、`--presets/--remove/--dry-run/--no-activate`） |
-| `make-icon.swift` | 程序化生成 1024px 图标 |
-| `ddc-probe.c` | DDC 只读诊断探针 |
-
-## 安装
-
-```bash
-open dist/HiDPI-0.1.0.dmg        # 拖进 Applications
-./scripts/build-app.sh            # 或自行构建
-```
-
-菜单栏常驻、不占 Dock、单实例保护。
-
-## 菜单
-
-每块显示器一个子菜单，分三层，不再平铺几十个模式：
+单显示器时**扁平展示**，不多套一层；多显示器才收进「显示器 ▸」。
 
 ```
-H27T22C — 1920×1080 HiDPI
-  ├─ 分辨率 ▸        1440×900（无 HiDPI）/ 1600×900 / 1680×1050（无 HiDPI）
-  │                  [x] 1920×1080 / 2048×1152 / 2304×1296 / 2560×1440
-  │                  3840×2160（原生，1:1 像素）
-  │                  ──────────
-  │                  全部分辨率… ▸   （完整模式表，含 LoDPI/HiDPI 与刷新率）
-  ├─ 刷新率 ▸        24 / 30 / 60 / 72 / [x] 75 Hz   （当前分辨率下全部刷新率）
-  ├─ ☑ 启用 HiDPI                      （同尺寸在 1x / 2x 间切换）
-设置…                    ← 颜色描述文件
-防止显示器睡眠
+H27T22C · 1920×1080 HiDPI · 开盖     ← 状态行，不可点
+──────────────
+分辨率 ▸      常见尺寸，当前项打勾
+刷新率 ▸      当前分辨率下的全部刷新率
+☑ 启用 HiDPI
+──────────────
+设置… （⌘,）  颜色描述文件
+☐ 防止显示器睡眠
 ☑ 开机自启动
-打开显示器设置…
-退出 HiDPI
+──────────────
+退出 HiDPI（⌘Q）
 ```
 
-- **分辨率**只列常见尺寸（白名单），同一尺寸只出现一次，选档时自动沿用当前的 HiDPI 状态
-- **刷新率**只列当前分辨率可用的档位
-- **HiDPI** 是开关，不是重复的列表项；某尺寸没有另一种密度时会提示用脚本注入
-- 分辨率项不再逐个标 HiDPI/LoDPI（密度由开关显示），只给缺少 HiDPI 变体的尺寸加注：
-  - `（无 HiDPI）`：系统没为这个尺寸生成 2x 变体，开启 HiDPI 后会落到 LoDPI
-  - `（原生，1:1 像素）`：面板原生分辨率，1 point = 1 pixel，本身就是最清晰的，不需要 HiDPI（HiDPI 反而要 2 倍背衬，超出面板能力）
-- 列表只保留 17 个常见尺寸（白名单），冷门分辨率不再出现
+收纳原则：
+
+| 位置 | 内容 | 理由 |
+|---|---|---|
+| 直接展示 | 分辨率、刷新率、HiDPI | 高频操作，最多点两下 |
+| 直接展示 | 设置 / 防睡眠 / 自启动 | 一次性开关或低频入口 |
+| 收进子菜单 | 全部分辨率档位（共 153 个） | 只在「分辨率」里给常见尺寸 |
+| 收进子菜单 | 多显示器的各自设置 | 单屏时不存在这一层 |
+| 状态行 | 显示器名、当前模式、合盖状态 | 只读，不占可点区域 |
 
 ## 开机自启动
 
@@ -251,13 +201,16 @@ Sources/
                   ├ hd.h / hd_internal.h   公开接口 / 内部符号解析
                   ├ hd_modes.m             模式枚举、切换、断开重连
                   ├ hd_system.m            合盖状态、防睡眠、重新枚举、EDID 身份
-                  ├ hd_color.m             ColorSync ICC 应用/查询
-                  └ hd_virtual.m           CGVirtualDisplay 虚拟屏
+                  └ hd_color.m             ColorSync ICC 应用/查询
   HiDPICore/      共享 Swift 模型
                   └ DisplayCatalog：模式表读取、去重、常见尺寸、原生判定、
                     密度变体查询、版本号 —— CLI 与 App 共用
   hidpi/          CLI
   HiDPIMenuBar/   菜单栏 App
+                  ├ main.swift             入口 + 单实例保护
+                  ├ AppDelegate.swift      菜单构建、动作、自启动
+                  ├ SettingsWindow.swift   设置窗口
+                  └ DisplayList.swift      NSScreen → 显示器清单
 ```
 
 设计约束：
@@ -285,7 +238,8 @@ hidpi/
 │   ├── ddc-probe.c              DDC 只读探针（诊断用）
 │   └── make-icon.swift          程序化生成图标
 └── Sources/
-    ├── HDShim/                  私有 API 封装（CGVirtualDisplay / CGS / SLS）
+    ├── HDShim/                  私有 API 封装（CGS / SLS / ColorSync / IOKit）
+    ├── HiDPICore/               共享显示模型（DisplayCatalog）
     ├── hidpi/                   命令行
     └── HiDPIMenuBar/            菜单栏 App
 ```
