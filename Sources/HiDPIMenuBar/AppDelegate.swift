@@ -130,9 +130,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
   private func headerText(displays: [(id: CGDirectDisplayID, name: String)]) -> String {
     guard let first = displays.first else { return "没有检测到显示器" }
-    let mode = DisplayCatalog.describe(DisplayCatalog.current(displayID: first.id))
+    let current = DisplayCatalog.current(displayID: first.id)
+    let mode = DisplayCatalog.describe(current)
+    let rate = current.map { " · \(Int($0.refresh.rounded()))Hz" } ?? ""
     let name = displays.count == 1 ? first.name : "\(displays.count) 块显示器"
-    return "\(name) · \(mode)\(DisplayCatalog.clamshellText())"
+    return "\(name) · \(mode)\(rate)\(DisplayCatalog.clamshellText())"
   }
 
   /// 单块显示器的可操作项：分辨率 / 刷新率 / HiDPI
