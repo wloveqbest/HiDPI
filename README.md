@@ -247,11 +247,12 @@ $ hidpi list
 
 ```
 Sources/
-  HDShim/         薄 C 层，只有头文件暴露接口（hd.h）
-                  ├ 私有 CGS / SLS（dlopen + dlsym，不硬链接）
-                  ├ ColorSync（ICC 应用/查询）
-                  ├ IOKit（AppleClamshellState、IOPMAssertion）
-                  └ CGVirtualDisplay（虚拟屏，CLI 用）
+  HDShim/         薄 C 层，按关注点拆成四个文件 + 一个内部头
+                  ├ hd.h / hd_internal.h   公开接口 / 内部符号解析
+                  ├ hd_modes.m             模式枚举、切换、断开重连
+                  ├ hd_system.m            合盖状态、防睡眠、重新枚举、EDID 身份
+                  ├ hd_color.m             ColorSync ICC 应用/查询
+                  └ hd_virtual.m           CGVirtualDisplay 虚拟屏
   HiDPICore/      共享 Swift 模型
                   └ DisplayCatalog：模式表读取、去重、常见尺寸、原生判定、
                     密度变体查询、版本号 —— CLI 与 App 共用

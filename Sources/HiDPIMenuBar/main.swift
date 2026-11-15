@@ -26,16 +26,36 @@ final class SettingsWindowController: NSWindowController {
   var onDisplay: ((CGDirectDisplayID) -> Void)?
 
   init() {
-    let window = NSWindow(
+    let window = NSPanel(
       contentRect: NSRect(x: 0, y: 0, width: 380, height: 130),
-      styleMask: [.titled, .closable],
+      styleMask: [.titled, .closable, .nonactivatingPanel],
       backing: .buffered,
       defer: false
     )
     window.title = "HiDPI 设置"
     window.isReleasedWhenClosed = false
+    window.isFloatingPanel = true
+    window.becomesKeyOnlyIfNeeded = false
+    window.hidesOnDeactivate = false
+    // 固定尺寸，避免布局把窗口撑大/缩小时产生位移
+    window.setContentSize(NSSize(width: 380, height: 130))
+    window.contentMinSize = NSSize(width: 380, height: 130)
+    window.contentMaxSize = NSSize(width: 380, height: 130)
+    window.isMovableByWindowBackground = true
+    window.setFrameAutosaveName("HiDPISettingsWindow")
     super.init(window: window)
     buildUI()
+  }
+
+  /// 首次显示时居中，之后沿用系统记住的位置
+  func present() {
+    guard let window else { return }
+    // 只在从未保存过位置时居中；之后交给 AppKit 的 frame autosave
+    if UserDefaults.standard.string(forKey: "NSWindow Frame HiDPISettingsWindow") == nil {
+      window.center()
+    }
+    showWindow(nil)
+    window.makeKeyAndOrderFront(nil)
   }
 
   required init?(coder: NSCoder) { fatalError() }
@@ -74,6 +94,7 @@ final class SettingsWindowController: NSWindowController {
       stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 18),
       stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -18),
       stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 18),
+      stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -18),
     ])
   }
 
@@ -173,7 +194,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     if ProcessInfo.processInfo.environment["HIDPI_DUMP_WINDOW"] == "1" {
       openSettings()
       let window = settingsController?.window
-      print("window=\(window != nil ? "ok" : "nil") size=\(window?.frame.size ?? .zero)")
+      print("window=\(window != nil ? "ok" : "nil") frame=\(window?.frame ?? .zero)")
+      print("screen=\(NSScreen.main?.visibleFrame ?? .zero)")
       exit(0)
     }
 
@@ -393,8 +415,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     selectedDisplay = CGMainDisplayID()
     settingsController?.reload(selected: selectedDisplay)
-    settingsController?.showWindow(nil)
-    NSApp.activate(ignoringOtherApps: true)
+    settingsController?.present()
   }
 
   @objc private func toggleSleepPrevention() {
