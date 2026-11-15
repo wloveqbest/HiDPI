@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var statusItem: NSStatusItem!
   private var settingsController: SettingsWindowController?
   private var selectedDisplay: CGDirectDisplayID = CGMainDisplayID()
+  private var isRebuilding = false
 
   // MARK: - 生命周期
 
@@ -66,14 +67,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     _ = hd_prevent_sleep(0)
   }
 
-  func menuNeedsUpdate(_ menu: NSMenu) {
+  /// 只在菜单即将打开时构建一次。
+  /// 之前用 menuNeedsUpdate，悬停子菜单时 AppKit 会反复触发，导致整表销毁重建、子菜单跳动。
+  func menuWillOpen(_ menu: NSMenu) {
     rebuildMenu()
   }
 
   // MARK: - 菜单构建
 
   private func rebuildMenu() {
-    guard let menu = statusItem.menu else { return }
+    guard let menu = statusItem.menu, !isRebuilding else { return }
+    isRebuilding = true
+    defer { isRebuilding = false }
     menu.removeAllItems()
 
     let displays = DisplayCatalog.attachedDisplays()
@@ -236,14 +241,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   @objc private func didWake() {
     DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
       self?.restoreColorProfile()
-      self?.rebuildMenu()
     }
   }
 
   @objc private func screensChanged() {
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
       self?.restoreColorProfile()
-      self?.rebuildMenu()
     }
   }
 
@@ -262,9 +265,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     guard let number = sender.representedObject as? NSNumber else { return }
     if hd_display_set_mode(number.uint32Value, Int32(sender.tag)) != 0 {
       notify(title: "切换失败", text: "系统拒绝了这次模式切换。")
-      return
     }
-    rebuildMenu()
   }
 
   @objc private func toggleHiDPI(_ sender: NSMenuItem) {
@@ -280,7 +281,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       return
     }
     _ = hd_display_set_mode(displayID, Int32(target.index))
-    rebuildMenu()
   }
 
   @objc private func openSettings() {
@@ -310,7 +310,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       notify(title: "设置失败", text: "无法创建防睡眠断言。")
       UserDefaults.standard.set(false, forKey: kSleepPreventionKey)
     }
-    rebuildMenu()
   }
 
   // MARK: - 开机自启动（LaunchAgent）
@@ -330,7 +329,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     } else {
       enableLaunchAtLogin()
     }
-    rebuildMenu()
   }
 
   private func enableLaunchAtLogin() {
