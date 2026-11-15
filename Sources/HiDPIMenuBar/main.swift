@@ -15,7 +15,7 @@ private let kSleepPreventionKey = "preventDisplaySleep"
 
 // MARK: - 设置窗口（颜色描述文件）
 
-final class SettingsWindowController: NSWindowController {
+final class SettingsWindowController: NSWindowController, NSWindowDelegate {
   private let displayPopup = NSPopUpButton(frame: .zero, pullsDown: false)
   private let profilePopup = NSPopUpButton(frame: .zero, pullsDown: false)
 
@@ -42,16 +42,23 @@ final class SettingsWindowController: NSWindowController {
     window.contentMinSize = NSSize(width: 380, height: 130)
     window.contentMaxSize = NSSize(width: 380, height: 130)
     window.isMovableByWindowBackground = true
-    window.setFrameAutosaveName("HiDPISettingsWindow")
     super.init(window: window)
+    window.delegate = self
     buildUI()
   }
 
   /// 首次显示时居中，之后沿用系统记住的位置
   func present() {
     guard let window else { return }
-    // 只在从未保存过位置时居中；之后交给 AppKit 的 frame autosave
-    if UserDefaults.standard.string(forKey: "NSWindow Frame HiDPISettingsWindow") == nil {
+    if let saved = UserDefaults.standard.string(forKey: "settingsWindowFrame") {
+      let frame = NSRectFromString(saved)
+      let onScreen = NSScreen.screens.contains { $0.visibleFrame.intersects(frame) }
+      if onScreen && frame.width > 0 {
+        window.setFrame(frame, display: true)
+      } else {
+        window.center()
+      }
+    } else {
       window.center()
     }
     showWindow(nil)
@@ -59,6 +66,13 @@ final class SettingsWindowController: NSWindowController {
   }
 
   required init?(coder: NSCoder) { fatalError() }
+
+  func windowWillClose(_ notification: Notification) {
+    // 关闭时记一次位置，拖动过程中不写盘，避免与 AppKit 的拖动收尾竞争
+    if let window = notification.object as? NSWindow {
+      UserDefaults.standard.set(NSStringFromRect(window.frame), forKey: "settingsWindowFrame")
+    }
+  }
 
   private func buildUI() {
     guard let content = window?.contentView else { return }
