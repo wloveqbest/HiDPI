@@ -96,6 +96,8 @@ H27T22C · 1920×1080 HiDPI · 75Hz · 开盖     ← 状态行（次要色，�
 - 应用时调用 `ColorSyncDeviceSetCustomProfiles`，系统会在 `/Library/ColorSync/Profiles/Displays/` 生成 `<显示器>-<UUID>.icc`
 - 「系统默认」= 把自定义项指回工厂 profile
 - 不需要 root
+- **只列「显示器类 + RGB」的 profile**（ICC 头 12–15 = `mntr`、16–19 = `RGB `）。抽象类（`abst`，如 Sepia Tone）、色彩空间类（`spac`）和灰度 profile 强设时会让 ColorSync 内部断言直接 abort（SIGABRT），`@try/@catch` 拦不住，只能在入口过滤 + 应用前二次校验
+- 「系统默认」= 用 `NULL` 清除自定义项，回到工厂 profile
 
 > 亮度调节（gamma 软件调光 + F1/F2 键绑定）已移除：gamma 是进程级的、App 退出即失效，且键拦截需要辅助功能权限，实用性不足。
 
@@ -174,8 +176,6 @@ swift build -c release
 | `hidpi modes <id>` | 列出全部模式，标注 HiDPI/LoDPI 与当前项 |
 | `hidpi set <id> <索引>` | 立即切换模式 |
 | `hidpi cycle <id> [秒]` | 软件断开/重连显示器（激活 override） |
-| `hidpi activate <id>` | 同 `cycle <id> 2` |
-| `hidpi detect` | `SLSDetectDisplays`（实测不足以激活 override，仅诊断用） |
 | `hidpi info <id>` | 厂商号/型号号与 override 路径（十进制 + 十六进制） |
 | `hidpi profiles` | 列出可用的颜色描述文件 |
 | `hidpi profile <id> [路径\|default]` | 查看/应用颜色描述文件 |

@@ -37,10 +37,6 @@ int hd_display_mode_at(uint32_t displayID, int index, hd_mode_t *out);
 /// 会短暂黑屏，调用方务必保证重连一定执行。
 int hd_cycle_display(uint32_t displayID, double seconds);
 
-/// 让 WindowServer 重新枚举显示器（私有 SLSDetectDisplays）。
-/// 写入 override plist 后用它可以免重启生效，具体是否成功取决于 macOS 版本。
-int hd_detect_displays(void);
-
 /// 显示器的厂商号 / 型号号（公开 API），用于生成 override plist 文件名
 uint32_t hd_display_vendor_id(uint32_t displayID);
 uint32_t hd_display_product_id(uint32_t displayID);

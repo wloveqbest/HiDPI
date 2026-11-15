@@ -98,17 +98,6 @@ int hd_sleep_prevented(void) {
   return gSleepAssertion != 0 ? 1 : 0;
 }
 
-typedef void (*SLSDetectDisplaysFn)(void);
-
-int hd_detect_displays(void) {
-  SLSDetectDisplaysFn fn = (SLSDetectDisplaysFn)hd_resolve_cgs("SLSDetectDisplays");
-  if (fn == NULL) {
-    return -1;
-  }
-  fn();
-  return 0;
-}
-
 uint32_t hd_display_vendor_id(uint32_t displayID) {
   return (uint32_t)CGDisplayVendorNumber(displayID);
 }

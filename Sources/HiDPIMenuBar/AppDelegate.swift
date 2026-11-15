@@ -42,10 +42,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       self, selector: #selector(didWake),
       name: NSWorkspace.didWakeNotification, object: nil
     )
-    NotificationCenter.default.addObserver(
-      self, selector: #selector(screensChanged),
-      name: NSApplication.didChangeScreenParametersNotification, object: nil
-    )
 
     if ProcessInfo.processInfo.environment["HIDPI_DUMP_MENU"] == "1" {
       dump(menu: menu, depth: 0)
@@ -174,18 +170,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
   }
 
-  @objc private func screensChanged() {
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-      self?.restoreColorProfile()
-    }
-  }
-
   private func restoreColorProfile() {
     let defaults = UserDefaults.standard
     for display in DisplayCatalog.attachedDisplays() {
-      if let profile = defaults.string(forKey: "profile-\(display.id)"), !profile.isEmpty {
-        _ = hd_apply_color_profile(display.id, profile)
-      }
+      guard let profile = defaults.string(forKey: "profile-\(display.id)"), !profile.isEmpty else { continue }
+
+      var currentPointer = hd_current_color_profile(display.id)
+      let current = currentPointer.map { String(cString: $0) }
+      if let currentPointer { free(currentPointer) }
+      guard current != profile else { continue }
+
+      _ = hd_apply_color_profile(display.id, profile)
     }
   }
 

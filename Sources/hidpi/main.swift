@@ -28,9 +28,7 @@ hidpi — 开源的 macOS HiDPI 工具
   hidpi list                             列出显示器及逻辑/像素尺寸
   hidpi modes <displayID>                列出某显示器的全部模式
   hidpi set <displayID> <index>          切换到指定模式索引
-  hidpi detect                           让系统重新枚举显示器
   hidpi cycle <displayID> [秒数]          软件断开/重连显示器（会黑屏，激活 override 用）
-  hidpi activate <displayID>             激活 override（等同 cycle <id> 2）
   hidpi info <displayID>                 显示厂商号/型号号（生成 override 用）
   hidpi state                            显示合盖状态与防睡眠状态
   hidpi profiles                         列出可用的颜色描述文件
@@ -219,29 +217,6 @@ func cmdProfile(_ args: [String]) {
   print(path == nil ? "已恢复系统默认颜色描述文件" : "已应用 \(path!)")
 }
 
-func cmdDetect() {
-  if hd_detect_displays() != 0 {
-    err("无法调用 SLSDetectDisplays（该 macOS 版本未导出此符号）")
-    return
-  }
-  print("已请求系统重新枚举显示器")
-}
-
-func cmdActivate(_ args: [String]) {
-  guard let displayID = args.first.flatMap(parseUInt32) else {
-    err("用法: hidpi activate <displayID>   （等价于 hidpi cycle <id> 2）")
-    return
-  }
-  print("断开并重连显示器 \(displayID)，迫使系统重读 override（屏幕会黑一下）…")
-  let result = hd_cycle_display(displayID, 2.0)
-  if result == 0 {
-    print("已激活")
-  } else {
-    err("激活失败，错误码 \(result)")
-  }
-}
-
-/// 用公开 API 数一数当前在线显示器
 func screenCount() -> Int {
   var count: UInt32 = 0
   CGGetActiveDisplayList(0, nil, &count)
@@ -297,12 +272,8 @@ case "profiles":
   cmdProfiles()
 case "profile":
   cmdProfile(Array(arguments.dropFirst()))
-case "detect":
-  cmdDetect()
 case "cycle":
   cmdCycle(Array(arguments.dropFirst()))
-case "activate":
-  cmdActivate(Array(arguments.dropFirst()))
 case "version", "--version", "-v":
   print("hidpi \(hidpiVersion) — MIT License")
   print("虚拟屏机制参考 BetterDummy OpenSource Edition (MIT, Istvan T.)")

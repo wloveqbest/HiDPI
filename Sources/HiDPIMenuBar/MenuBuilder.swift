@@ -255,8 +255,9 @@ enum MenuBuilder {
       for index in 0 ..< Int(count) {
         guard let cString = paths[index] else { continue }
         let path = String(cString: cString)
+        let name = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
         profileItems.append(router.makeItem(
-          title: (path as NSString).lastPathComponent,
+          title: name,
           state: path == currentProfile ? .on : .off
         ) { onApplyProfile(display.id, path) })
       }
