@@ -17,7 +17,6 @@ private let launchAgentLabel = "pro.local.hidpi"
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var statusItem: NSStatusItem!
-  private var settingsController: SettingsWindowController?
   private var selectedDisplay: CGDirectDisplayID = CGMainDisplayID()
   private var isRebuilding = false
 
@@ -49,13 +48,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       self, selector: #selector(screensChanged),
       name: NSApplication.didChangeScreenParametersNotification, object: nil
     )
-
-    if ProcessInfo.processInfo.environment["HIDPI_DUMP_WINDOW"] == "1" {
-      openSettings()
-      let window = settingsController?.window
-      print("window=\(window != nil ? "ok" : "nil") frame=\(window?.frame ?? .zero)")
-      exit(0)
-    }
 
     if ProcessInfo.processInfo.environment["HIDPI_DUMP_MENU"] == "1" {
       dump(menu: menu, depth: 0)
@@ -113,10 +105,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     menu.addItem(.separator())
-
-    let settings = NSMenuItem(title: "设置…", action: #selector(openSettings), keyEquivalent: ",")
-    settings.target = self
-    menu.addItem(settings)
 
     let sleepItem = NSMenuItem(title: "保持屏幕常亮（不自动熄屏）", action: #selector(toggleSleepPrevention), keyEquivalent: "")
     sleepItem.target = self
@@ -222,7 +210,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     hidpiItem.representedObject = NSNumber(value: displayID)
     hidpiItem.state = current?.hiDPI == true ? .on : .off
 
-    return [resolutionItem, refreshItem, hidpiItem]
+    // 颜色描述文件
+    let profileItem = NSMenuItem(title: "颜色描述文件", action: nil, keyEquivalent: "")
+    profileItem.submenu = colorProfileMenu(for: displayID)
+
+    return [resolutionItem, refreshItem, hidpiItem, profileItem]
+  }
+
+  private func colorProfileMenu(for displayID: CGDirectDisplayID) -> NSMenu {
+    let menu = NSMenu()
+    menu.minimumWidth = 280
+
+    var currentPointer = hd_current_color_profile(displayID)
+    let currentProfile = currentPointer.map { String(cString: $0) }
+    if let currentPointer { free(currentPointer) }
+
+    let defaultItem = NSMenuItem(title: "系统默认", action: #selector(applyProfile(_:)), keyEquivalent: "")
+    defaultItem.target = self
+    defaultItem.representedObject = "\(displayID)|"
+    defaultItem.state = currentProfile == nil ? .on : .off
+    menu.addItem(defaultItem)
+    menu.addItem(.separator())
+
+    var paths: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+    var count: Int32 = 0
+    if hd_list_color_profiles(&paths, &count) == 0, let paths {
+      defer { hd_free_profiles(paths, count) }
+      for index in 0 ..< Int(count) {
+        guard let cString = paths[index] else { continue }
+        let path = String(cString: cString)
+        let item = NSMenuItem(title: (path as NSString).lastPathComponent,
+                              action: #selector(applyProfile(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = "\(displayID)|\(path)"
+        item.state = path == currentProfile ? .on : .off
+        menu.addItem(item)
+      }
+    }
+    return menu
+  }
+
+  @objc private func applyProfile(_ sender: NSMenuItem) {
+    guard let payload = sender.representedObject as? String else { return }
+    let parts = payload.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+    guard let displayID = UInt32(parts[0]) else { return }
+    let path = parts.count > 1 ? String(parts[1]) : ""
+    let result = path.isEmpty ? hd_apply_color_profile(displayID, nil) : hd_apply_color_profile(displayID, path)
+    if result != 0 {
+      notify(title: "应用失败", text: "错误码 \(result)")
+      return
+    }
+    UserDefaults.standard.set(path, forKey: "profile-\(displayID)")
   }
 
   private func dump(menu: NSMenu, depth: Int) {
@@ -283,26 +321,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       return
     }
     _ = hd_display_set_mode(displayID, Int32(target.index))
-  }
-
-  @objc private func openSettings() {
-    if settingsController == nil {
-      settingsController = SettingsWindowController()
-      settingsController?.onProfile = { [weak self] path in
-        guard let self else { return }
-        _ = path.map { hd_apply_color_profile(self.selectedDisplay, $0) }
-          ?? hd_apply_color_profile(self.selectedDisplay, nil)
-        UserDefaults.standard.set(path ?? "", forKey: "profile-\(self.selectedDisplay)")
-      }
-      settingsController?.onDisplay = { [weak self] id in
-        guard let self else { return }
-        self.selectedDisplay = id
-        self.settingsController?.reload(selected: id)
-      }
-    }
-    selectedDisplay = CGMainDisplayID()
-    settingsController?.reload(selected: selectedDisplay)
-    settingsController?.present()
   }
 
   @objc private func toggleSleepPrevention() {
