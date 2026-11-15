@@ -79,6 +79,7 @@ enum MenuBuilder {
     onSelectMode: @escaping (CGDirectDisplayID, Int) -> Void,
     onToggleHiDPI: @escaping (CGDirectDisplayID) -> Void,
     onApplyProfile: @escaping (CGDirectDisplayID, String?) -> Void,
+    onToggleHDR: @escaping (CGDirectDisplayID) -> Void,
     onToggleSleepPrevention: @escaping () -> Void,
     onToggleLaunchAtLogin: @escaping () -> Void
   ) -> [NSMenuItem] {
@@ -92,13 +93,15 @@ enum MenuBuilder {
     if single, let display = state.displays.first {
       items.append(contentsOf: displayItems(
         for: display, router: router,
-        onSelectMode: onSelectMode, onToggleHiDPI: onToggleHiDPI, onApplyProfile: onApplyProfile
+        onSelectMode: onSelectMode, onToggleHiDPI: onToggleHiDPI,
+        onApplyProfile: onApplyProfile, onToggleHDR: onToggleHDR
       ))
     } else if !state.displays.isEmpty {
       let children = state.displays.map { display -> NSMenuItem in
         let inner = displayItems(
           for: display, router: router,
-          onSelectMode: onSelectMode, onToggleHiDPI: onToggleHiDPI, onApplyProfile: onApplyProfile
+          onSelectMode: onSelectMode, onToggleHiDPI: onToggleHiDPI,
+          onApplyProfile: onApplyProfile, onToggleHDR: onToggleHDR
         )
         let submenu = NSMenu()
         submenu.autoenablesItems = false
@@ -168,7 +171,8 @@ enum MenuBuilder {
     router: MenuActionRouter,
     onSelectMode: @escaping (CGDirectDisplayID, Int) -> Void,
     onToggleHiDPI: @escaping (CGDirectDisplayID) -> Void,
-    onApplyProfile: @escaping (CGDirectDisplayID, String?) -> Void
+    onApplyProfile: @escaping (CGDirectDisplayID, String?) -> Void,
+    onToggleHDR: @escaping (CGDirectDisplayID) -> Void
   ) -> [NSMenuItem] {
     let entries = DisplayCatalog.deduped(displayID: display.id)
     guard !entries.isEmpty else {
@@ -254,6 +258,23 @@ enum MenuBuilder {
       ) { onApplyProfile(display.id, profile.path) })
     }
 
+    // HDR
+    let hdrSupported = hd_hdr_supported(display.id)
+    let hdrEnabled = hd_hdr_enabled(display.id)
+    var hdrItems: [NSMenuItem] = []
+    if hdrSupported != 1 {
+      let reason = hdrSupported == 0 ? "当前链路不支持" : "接口不可用"
+      let info = router.makeItem(title: "HDR 不可用（\(reason)）", systemImage: "exclamationmark.triangle") {}
+      info.isEnabled = false
+      hdrItems.append(info)
+    } else {
+      let toggle = router.makeItem(
+        title: "启用 HDR",
+        state: hdrEnabled == 1 ? .on : .off
+      ) { onToggleHDR(display.id) }
+      hdrItems.append(toggle)
+    }
+
     let hidpiItem = router.makeItem(
       title: "启用 HiDPI",
       systemImage: "sparkles",
@@ -265,6 +286,7 @@ enum MenuBuilder {
       router.makeSubmenu(title: "刷新率", systemImage: "arrow.triangle.2.circlepath", items: refreshItems),
       hidpiItem,
       router.makeSubmenu(title: "颜色描述文件", systemImage: "paintpalette", items: profileItems),
+      router.makeSubmenu(title: "HDR", systemImage: "sun.max.circle", items: hdrItems),
     ]
   }
 }

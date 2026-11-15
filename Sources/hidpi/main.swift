@@ -31,6 +31,7 @@ hidpi — 开源的 macOS HiDPI 工具
   hidpi cycle <displayID> [秒数]          软件断开/重连显示器（会黑屏，激活 override 用）
   hidpi info <displayID>                 显示厂商号/型号号（生成 override 用）
   hidpi state                            显示合盖状态与防睡眠状态
+  hidpi hdr [on|off]                     查看/切换 HDR（需要链路支持）
   hidpi profiles                         列出可用的颜色描述文件
   hidpi profile <id> [路径|default]      查看/应用颜色描述文件
   hidpi version                          版本信息
@@ -172,6 +173,33 @@ func cmdState() {
   print("提示: 防睡眠开关由菜单栏 App 持有，CLI 无法查询")
 }
 
+func cmdHDR(_ args: [String]) {
+  guard let displayID = args.first.flatMap(parseUInt32) else {
+    err("用法: hidpi hdr <displayID> [on|off]")
+    return
+  }
+  let supported = hd_hdr_supported(displayID)
+  let enabled = hd_hdr_enabled(displayID)
+  if args.count == 1 {
+    print("显示器 \(displayID)")
+    print("  链路支持 HDR: \(supported == 1 ? "是" : (supported == 0 ? "否" : "接口不可用"))")
+    print("  当前 HDR: \(enabled == 1 ? "已开启" : (enabled == 0 ? "已关闭" : "未知"))")
+    return
+  }
+  let want = args[1].lowercased()
+  guard want == "on" || want == "off" else {
+    err("第三个参数只能是 on 或 off")
+    return
+  }
+  let result = hd_hdr_set(displayID, want == "on" ? 1 : 0)
+  switch result {
+  case 0: print("已\(want == "on" ? "开启" : "关闭") HDR")
+  case -1: err("SLSDisplaySetHDRModeEnabled 不可用")
+  case -2: err("该显示器/链路不支持 HDR")
+  default: err("未知错误 \(result)")
+  }
+}
+
 func cmdProfiles() {
   let profiles = ColorProfileCatalog.all()
   guard !profiles.isEmpty else {
@@ -263,6 +291,8 @@ case "info":
   cmdInfo(Array(arguments.dropFirst()))
 case "state":
   cmdState()
+case "hdr":
+  cmdHDR(Array(arguments.dropFirst()))
 case "profiles":
   cmdProfiles()
 case "profile":

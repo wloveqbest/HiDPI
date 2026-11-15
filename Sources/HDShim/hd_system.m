@@ -98,6 +98,42 @@ int hd_sleep_prevented(void) {
   return gSleepAssertion != 0 ? 1 : 0;
 }
 
+#pragma mark - HDR（SkyLight 私有）
+
+typedef int (*SLSDisplaySupportsHDRModeFn)(uint32_t);
+typedef int (*SLSDisplayIsHDRModeEnabledFn)(uint32_t);
+typedef void (*SLSDisplaySetHDRModeEnabledFn)(uint32_t, bool);
+
+int hd_hdr_supported(uint32_t displayID) {
+  SLSDisplaySupportsHDRModeFn fn = (SLSDisplaySupportsHDRModeFn)hd_resolve_cgs("SLSDisplaySupportsHDRMode");
+  if (fn == NULL) {
+    return -1;
+  }
+  return fn(displayID);
+}
+
+int hd_hdr_enabled(uint32_t displayID) {
+  SLSDisplayIsHDRModeEnabledFn fn =
+      (SLSDisplayIsHDRModeEnabledFn)hd_resolve_cgs("SLSDisplayIsHDRModeEnabled");
+  if (fn == NULL) {
+    return -1;
+  }
+  return fn(displayID);
+}
+
+int hd_hdr_set(uint32_t displayID, int enabled) {
+  SLSDisplaySetHDRModeEnabledFn fn =
+      (SLSDisplaySetHDRModeEnabledFn)hd_resolve_cgs("SLSDisplaySetHDRModeEnabled");
+  if (fn == NULL) {
+    return -1;
+  }
+  if (hd_hdr_supported(displayID) != 1) {
+    return -2;
+  }
+  fn(displayID, enabled != 0);
+  return 0;
+}
+
 uint32_t hd_display_vendor_id(uint32_t displayID) {
   return (uint32_t)CGDisplayVendorNumber(displayID);
 }

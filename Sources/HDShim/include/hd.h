@@ -30,6 +30,13 @@ int hd_prevent_sleep(int enable);
 /// 当前是否持有防睡眠断言
 int hd_sleep_prevented(void);
 
+/// HDR：1 支持 / 0 不支持 / -1 接口不可用
+int hd_hdr_supported(uint32_t displayID);
+/// HDR 当前状态：1 开 / 0 关 / -1 未知
+int hd_hdr_enabled(uint32_t displayID);
+/// 切换 HDR，返回 0 成功
+int hd_hdr_set(uint32_t displayID, int enabled);
+
 int hd_display_mode_count(uint32_t displayID);
 int hd_display_mode_at(uint32_t displayID, int index, hd_mode_t *out);
 
